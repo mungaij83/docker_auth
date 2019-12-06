@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -28,105 +29,16 @@ import (
 	"time"
 
 	"github.com/cesanta/glog"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type GoogleAuthConfig struct {
-	Domain           string `yaml:"domain,omitempty"`
-	ClientId         string `yaml:"client_id,omitempty"`
-	ClientSecret     string `yaml:"client_secret,omitempty"`
-	ClientSecretFile string `yaml:"client_secret_file,omitempty"`
-	TokenDB          string `yaml:"token_db,omitempty"`
-	HTTPTimeout      int    `yaml:"http_timeout,omitempty"`
-}
-
-type GoogleAuthRequest struct {
-	Action string `json:"action,omitempty"`
-	Code   string `json:"code,omitempty"`
-	Token  string `json:"token,omitempty"`
-}
-
-// From github.com/google-api-go-client/oauth2/v2/oauth2-gen.go
-type GoogleTokenInfo struct {
-	// AccessType: The access type granted with this token. It can be
-	// offline or online.
-	AccessType string `json:"access_type,omitempty"`
-
-	// Audience: Who is the intended audience for this token. In general the
-	// same as issued_to.
-	Audience string `json:"audience,omitempty"`
-
-	// Email: The email address of the user. Present only if the email scope
-	// is present in the request.
-	Email string `json:"email,omitempty"`
-
-	// ExpiresIn: The expiry time of the token, as number of seconds left
-	// until expiry.
-	ExpiresIn int64 `json:"expires_in,omitempty"`
-
-	// IssuedTo: To whom was the token issued to. In general the same as
-	// audience.
-	IssuedTo string `json:"issued_to,omitempty"`
-
-	// Scope: The space separated list of scopes granted to this token.
-	Scope string `json:"scope,omitempty"`
-
-	// TokenHandle: The token handle associated with this token.
-	TokenHandle string `json:"token_handle,omitempty"`
-
-	// UserId: The obfuscated user id.
-	UserId string `json:"user_id,omitempty"`
-
-	// VerifiedEmail: Boolean flag which is true if the email address is
-	// verified. Present only if the email scope is present in the request.
-	VerifiedEmail bool `json:"verified_email,omitempty"`
-
-	// Returned in case of error.
-	Error            string `json:"error,omitempty"`
-	ErrorDescription string `json:"error_description,omitempty"`
-}
-
-// CodeToTokenResponse is sent by Google servers in response to the grant_type=authorization_code request.
-type CodeToTokenResponse struct {
-	IDToken      string `json:"id_token,omitempty"`
-	AccessToken  string `json:"access_token,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int64  `json:"expires_in,omitempty"`
-	TokenType    string `json:"token_type,omitempty"`
-
-	// Returned in case of error.
-	Error            string `json:"error,omitempty"`
-	ErrorDescription string `json:"error_description,omitempty"`
-}
-
-// CodeToTokenResponse is sent by Google servers in response to the grant_type=refresh_token request.
-type RefreshTokenResponse struct {
-	AccessToken string `json:"access_token,omitempty"`
-	ExpiresIn   int64  `json:"expires_in,omitempty"`
-	TokenType   string `json:"token_type,omitempty"`
-
-	// Returned in case of error.
-	Error            string `json:"error,omitempty"`
-	ErrorDescription string `json:"error_description,omitempty"`
-}
-
-// ProfileResponse is sent by the /userinfo/v2/me endpoint.
-// We use it to validate access token and (re)verify the email address associated with it.
-type ProfileResponse struct {
-	Email         string `json:"email,omitempty"`
-	VerifiedEmail bool   `json:"verified_email,omitempty"`
-	// There are more fields, but we only need email.
-}
-
 type GoogleAuth struct {
-	config *GoogleAuthConfig
+	config *utils.GoogleAuthConfig
 	db     TokenDB
 	client *http.Client
 	tmpl   *template.Template
 }
 
-func NewGoogleAuth(c *GoogleAuthConfig) (*GoogleAuth, error) {
+func NewGoogleAuth(c *utils.GoogleAuthConfig) (*GoogleAuth, error) {
 	db, err := NewTokenDB(c.TokenDB)
 	if err != nil {
 		return nil, err
@@ -147,7 +59,7 @@ func (ga *GoogleAuth) DoGoogleAuth(rw http.ResponseWriter, req *http.Request) {
 	}
 	gauthRequest, _ := ioutil.ReadAll(req.Body)
 	glog.V(2).Infof("gauth request: %s", string(gauthRequest))
-	var gar GoogleAuthRequest
+	var gar utils.GoogleAuthRequest
 	err := json.Unmarshal(gauthRequest, &gar)
 	if err != nil {
 		http.Error(rw, "Invalid auth request", http.StatusBadRequest)
@@ -187,10 +99,10 @@ func (ga *GoogleAuth) doGoogleAuthCreateToken(rw http.ResponseWriter, code strin
 		return
 	}
 	codeResp, _ := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	glog.V(2).Infof("Code to token resp: %s", strings.Replace(string(codeResp), "\n", " ", -1))
 
-	var c2t CodeToTokenResponse
+	var c2t utils.CodeToTokenResponse
 	err = json.Unmarshal(codeResp, &c2t)
 	if err != nil || c2t.Error != "" || c2t.ErrorDescription != "" {
 		var et string
@@ -236,19 +148,19 @@ func (ga *GoogleAuth) doGoogleAuthCreateToken(rw http.ResponseWriter, code strin
 		return
 	}
 
-	fmt.Fprintf(rw, `Server logged in; now run "docker login YOUR_REGISTRY_FQDN", use %s as login and %s as password.`, user, dp)
+	_, _ = fmt.Fprintf(rw, `Server logged in; now run "docker login YOUR_REGISTRY_FQDN", use %s as login and %s as password.`, user, dp)
 }
 
-func (ga *GoogleAuth) getIDTokenInfo(token string) (*GoogleTokenInfo, error) {
+func (ga *GoogleAuth) getIDTokenInfo(token string) (*utils.GoogleTokenInfo, error) {
 	// There is no Go auth library yet, using the tokeninfo endpoint.
 	resp, err := http.Get(fmt.Sprintf("https://www.googleapis.com/oauth2/v2/tokeninfo?id_token=%s", token))
 	if err != nil {
 		return nil, fmt.Errorf("could not verify token %s: %s", token, err)
 	}
 	body, _ := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
-	var ti GoogleTokenInfo
+	var ti utils.GoogleTokenInfo
 	err = json.Unmarshal(body, &ti)
 	if err != nil {
 		return nil, fmt.Errorf("could not unmarshal token info %q: %s", string(body), err)
@@ -287,7 +199,7 @@ func (ga *GoogleAuth) checkDomain(email string) error {
 }
 
 // https://developers.google.com/identity/protocols/OAuth2WebServer#refresh
-func (ga *GoogleAuth) refreshAccessToken(refreshToken string) (rtr RefreshTokenResponse, err error) {
+func (ga *GoogleAuth) refreshAccessToken(refreshToken string) (rtr utils.RefreshTokenResponse, err error) {
 	resp, err := ga.client.PostForm(
 		"https://www.googleapis.com/oauth2/v3/token",
 		url.Values{
@@ -319,7 +231,7 @@ func (ga *GoogleAuth) validateAccessToken(toktype, token string) (user string, e
 	}
 	respStr, _ := ioutil.ReadAll(resp.Body)
 	glog.V(2).Infof("Access token validation rrsponse: %s", strings.Replace(string(respStr), "\n", " ", -1))
-	var pr ProfileResponse
+	var pr utils.ProfileResponse
 	err = json.Unmarshal(respStr, &pr)
 	if err != nil {
 		return
@@ -384,7 +296,7 @@ func (ga *GoogleAuth) doGoogleAuthCheck(rw http.ResponseWriter, token string) {
 	}
 	// Truncate to seconds for presentation.
 	texp := time.Duration(int64(dbv.ValidUntil.Sub(time.Now()).Seconds())) * time.Second
-	fmt.Fprintf(rw, "Server token for %s validated, expires in %s", ti.Email, texp)
+	_, _ = fmt.Fprintf(rw, "Server token for %s validated, expires in %s", ti.Email, texp)
 }
 
 func (ga *GoogleAuth) doGoogleAuthSignOut(rw http.ResponseWriter, token string) {
@@ -398,10 +310,10 @@ func (ga *GoogleAuth) doGoogleAuthSignOut(rw http.ResponseWriter, token string) 
 	if err != nil {
 		glog.Error(err)
 	}
-	fmt.Fprint(rw, "signed out")
+	_, _ = fmt.Fprint(rw, "signed out")
 }
 
-func (ga *GoogleAuth) Authenticate(user string, password api.PasswordString) (bool, api.Labels, error) {
+func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
 	err := ga.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = ga.validateServerToken(user)
@@ -415,7 +327,7 @@ func (ga *GoogleAuth) Authenticate(user string, password api.PasswordString) (bo
 }
 
 func (ga *GoogleAuth) Stop() {
-	ga.db.Close()
+	_ = ga.db.Close()
 	glog.Info("Token DB closed")
 }
 

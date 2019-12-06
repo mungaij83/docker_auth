@@ -1,4 +1,4 @@
-package authz
+package utils
 
 import (
 	"encoding/json"
@@ -12,8 +12,6 @@ import (
 
 	"github.com/cesanta/glog"
 	"github.com/schwarmco/go-cartesian-product"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
 type ACL []ACLEntry
@@ -33,9 +31,7 @@ type MatchConditions struct {
 	Labels  map[string]string `yaml:"labels,omitempty" json:"labels,omitempty"`
 }
 
-type aclAuthorizer struct {
-	acl ACL
-}
+
 
 func validatePattern(p string) error {
 	if len(p) > 2 && p[0] == '/' && p[len(p)-1] == '/' {
@@ -66,7 +62,7 @@ func parseIPPattern(ipp string) (*net.IPNet, error) {
 	}
 }
 
-func validateMatchConditions(mc *MatchConditions) error {
+func ValidateMatchConditions(mc *MatchConditions) error {
 	for _, p := range []*string{mc.Account, mc.Type, mc.Name, mc.Service} {
 		if p == nil {
 			continue
@@ -93,46 +89,13 @@ func validateMatchConditions(mc *MatchConditions) error {
 
 func ValidateACL(acl ACL) error {
 	for i, e := range acl {
-		err := validateMatchConditions(e.Match)
+		err := ValidateMatchConditions(e.Match)
 		if err != nil {
 			return fmt.Errorf("entry %d, invalid match conditions: %s", i, err)
 		}
 	}
 	return nil
 }
-
-// NewACLAuthorizer Creates a new static authorizer with ACL that have been read from the config file
-func NewACLAuthorizer(acl ACL) (api.Authorizer, error) {
-	if err := ValidateACL(acl); err != nil {
-		return nil, err
-	}
-	glog.V(1).Infof("Created ACL Authorizer with %d entries", len(acl))
-	return &aclAuthorizer{acl: acl}, nil
-}
-
-func (aa *aclAuthorizer) Authorize(ai *api.AuthRequestInfo) ([]string, error) {
-	for _, e := range aa.acl {
-		matched := e.Matches(ai)
-		if matched {
-			glog.V(2).Infof("%s matched %s (Comment: %s)", ai, e, e.Comment)
-			if len(*e.Actions) == 1 && (*e.Actions)[0] == "*" {
-				return ai.Actions, nil
-			}
-			return StringSetIntersection(ai.Actions, *e.Actions), nil
-		}
-	}
-	return nil, api.NoMatch
-}
-
-func (aa *aclAuthorizer) Stop() {
-	// Nothing to do.
-}
-
-func (aa *aclAuthorizer) Name() string {
-	return "static ACL"
-}
-
-type aclEntryJSON *ACLEntry
 
 func (e ACLEntry) String() string {
 	b, _ := json.Marshal(e)
@@ -205,7 +168,7 @@ func matchIP(ipp *string, ip net.IP) bool {
 	return ipnet.Contains(ip)
 }
 
-func matchLabels(ml map[string]string, rl api.Labels, vars []string) bool {
+func matchLabels(ml map[string]string, rl Labels, vars []string) bool {
 	for label, pattern := range ml {
 		labelValues := rl[label]
 		matched := false
@@ -233,7 +196,7 @@ func getField(i interface{}, name string) (string, bool) {
 	return f.String(), true
 }
 
-func (mc *MatchConditions) Matches(ai *api.AuthRequestInfo) bool {
+func (mc *MatchConditions) Matches(ai *AuthRequestInfo) bool {
 	vars := []string{
 		"${account}", regexp.QuoteMeta(ai.Account),
 		"${type}", regexp.QuoteMeta(ai.Type),
@@ -287,6 +250,6 @@ func (mc *MatchConditions) Matches(ai *api.AuthRequestInfo) bool {
 		matchLabels(mc.Labels, ai.Labels, vars)
 }
 
-func (e *ACLEntry) Matches(ai *api.AuthRequestInfo) bool {
+func (e *ACLEntry) Matches(ai *AuthRequestInfo) bool {
 	return e.Match.Matches(ai)
 }

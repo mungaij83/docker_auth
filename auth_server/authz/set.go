@@ -17,7 +17,7 @@ func makeSet(ss []string) mapset.Set {
 func StringSetIntersection(a, b []string) []string {
 	as := makeSet(a)
 	bs := makeSet(b)
-	d := []string{}
+	d := make([]string,0)
 	for s := range as.Intersect(bs).Iter() {
 		d = append(d, s.(string))
 	}

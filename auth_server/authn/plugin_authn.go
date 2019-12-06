@@ -17,51 +17,18 @@
 package authn
 
 import (
-	"fmt"
-	"plugin"
-
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type PluginAuthnConfig struct {
-	PluginPath string `yaml:"plugin_path"`
-}
 
-func lookupAuthnSymbol(cfg *PluginAuthnConfig) (api.Authenticator, error) {
-	// load module
-	plug, err := plugin.Open(cfg.PluginPath)
-	if err != nil {
-		return nil, fmt.Errorf("error while loading authn plugin: %v", err)
-	}
-
-	// look up for Authn
-	symAuthen, err := plug.Lookup("Authn")
-	if err != nil {
-		return nil, fmt.Errorf("error while loading authn exporting the variable: %v", err)
-	}
-
-	// assert that loaded symbol is of a desired type
-	var authn api.Authenticator
-	authn, ok := symAuthen.(api.Authenticator)
-	if !ok {
-		return nil, fmt.Errorf("unexpected type from module symbol. Unable to cast Authn module")
-	}
-	return authn, nil
-}
-
-func (c *PluginAuthnConfig) Validate() error {
-	_, err := lookupAuthnSymbol(c)
-	return err
-}
 
 type PluginAuthn struct {
-	cfg   *PluginAuthnConfig
-	Authn api.Authenticator
+	cfg   *utils.PluginAuthnConfig
+	Authn utils.Authenticator
 }
 
-func (c *PluginAuthn) Authenticate(user string, password api.PasswordString) (bool, api.Labels, error) {
+func (c *PluginAuthn) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
 	// use the plugin
 	return c.Authn.Authenticate(user, password)
 }
@@ -73,9 +40,9 @@ func (c *PluginAuthn) Name() string {
 	return "plugin auth"
 }
 
-func NewPluginAuthn(cfg *PluginAuthnConfig) (*PluginAuthn, error) {
+func NewPluginAuthn(cfg *utils.PluginAuthnConfig) (*PluginAuthn, error) {
 	glog.Infof("Plugin authenticator: %s", cfg)
-	authn, err := lookupAuthnSymbol(cfg)
+	authn, err := utils.LookupAuthnSymbol(cfg)
 	if err != nil {
 		return nil, err
 	}

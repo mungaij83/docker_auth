@@ -17,40 +17,22 @@
 package authn
 
 import (
-	"encoding/json"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"golang.org/x/crypto/bcrypt"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type Requirements struct {
-	Password *api.PasswordString `yaml:"password,omitempty" json:"password,omitempty"`
-	Labels   api.Labels          `yaml:"labels,omitempty" json:"labels,omitempty"`
-}
-
 type staticUsersAuth struct {
-	users map[string]*Requirements
+	users map[string]*utils.Requirements
 }
 
-func (r Requirements) String() string {
-	p := r.Password
-	if p != nil {
-		pm := api.PasswordString("***")
-		r.Password = &pm
-	}
-	b, _ := json.Marshal(r)
-	r.Password = p
-	return string(b)
-}
-
-func NewStaticUserAuth(users map[string]*Requirements) *staticUsersAuth {
+func NewStaticUserAuth(users map[string]*utils.Requirements) *staticUsersAuth {
 	return &staticUsersAuth{users: users}
 }
 
-func (sua *staticUsersAuth) Authenticate(user string, password api.PasswordString) (bool, api.Labels, error) {
+func (sua *staticUsersAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
 	reqs := sua.users[user]
 	if reqs == nil {
-		return false, nil, api.NoMatch
+		return false, nil, utils.NoMatch
 	}
 	if reqs.Password != nil {
 		if bcrypt.CompareHashAndPassword([]byte(*reqs.Password), []byte(password)) != nil {

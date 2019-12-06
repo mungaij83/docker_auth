@@ -3,6 +3,7 @@ package authz
 import (
 	"errors"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"io"
 	"sync"
 	"time"
@@ -11,28 +12,21 @@ import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 
-	"github.com/cesanta/docker_auth/auth_server/api"
 	"github.com/cesanta/docker_auth/auth_server/mgo_session"
 )
 
 type MongoACL []MongoACLEntry
 
 type MongoACLEntry struct {
-	ACLEntry `bson:",inline"`
+	utils.ACLEntry `bson:",inline"`
 	Seq      *int
-}
-
-type ACLMongoConfig struct {
-	MongoConfig *mgo_session.Config `yaml:"dial_info,omitempty"`
-	Collection  string              `yaml:"collection,omitempty"`
-	CacheTTL    time.Duration       `yaml:"cache_ttl,omitempty"`
 }
 
 type aclMongoAuthorizer struct {
 	lastCacheUpdate  time.Time
 	lock             sync.RWMutex
-	config           *ACLMongoConfig
-	staticAuthorizer api.Authorizer
+	config           *utils.ACLMongoConfig
+	staticAuthorizer utils.Authorizer
 	session          *mgo.Session
 	updateTicker     *time.Ticker
 	Collection       string        `yaml:"collection,omitempty"`
@@ -40,7 +34,7 @@ type aclMongoAuthorizer struct {
 }
 
 // NewACLMongoAuthorizer creates a new ACL MongoDB authorizer
-func NewACLMongoAuthorizer(c *ACLMongoConfig) (api.Authorizer, error) {
+func NewACLMongoAuthorizer(c *utils.ACLMongoConfig) (utils.Authorizer, error) {
 	// Attempt to create new MongoDB session.
 	session, err := mgo_session.New(c.MongoConfig)
 	if err != nil {
@@ -63,7 +57,7 @@ func NewACLMongoAuthorizer(c *ACLMongoConfig) (api.Authorizer, error) {
 	return authorizer, nil
 }
 
-func (ma *aclMongoAuthorizer) Authorize(ai *api.AuthRequestInfo) ([]string, error) {
+func (ma *aclMongoAuthorizer) Authorize(ai *utils.AuthRequestInfo) ([]string, error) {
 	ma.lock.RLock()
 	defer ma.lock.RUnlock()
 
@@ -73,25 +67,6 @@ func (ma *aclMongoAuthorizer) Authorize(ai *api.AuthRequestInfo) ([]string, erro
 	}
 
 	return ma.staticAuthorizer.Authorize(ai)
-}
-
-// Validate ensures that any custom config options
-// in a Config are set correctly.
-func (c *ACLMongoConfig) Validate(configKey string) error {
-	//First validate the MongoDB config.
-	if err := c.MongoConfig.Validate(configKey); err != nil {
-		return err
-	}
-
-	// Now check additional config fields.
-	if c.Collection == "" {
-		return fmt.Errorf("%s.collection is required", configKey)
-	}
-	if c.CacheTTL < 0 {
-		return fmt.Errorf("%s.cache_ttl is required (e.g. \"1m\" for 1 minute)", configKey)
-	}
-
-	return nil
 }
 
 func (ma *aclMongoAuthorizer) Stop() {
@@ -177,7 +152,7 @@ func (ma *aclMongoAuthorizer) updateACLCache() error {
 		return errors.New(fmt.Sprintf("Seq not set for ACL entry: %+v", topACL))
 	}
 
-	var retACL ACL
+	var retACL utils.ACL
 	for _, e := range newACL {
 		retACL = append(retACL, e.ACLEntry)
 	}

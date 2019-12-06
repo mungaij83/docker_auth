@@ -16,11 +16,13 @@
 
 //go:generate ./gen_version.py
 
-package main // import "github.com/cesanta/docker_auth/auth_server"
+package main
 
 import (
 	"crypto/tls"
 	"flag"
+	"github.com/cesanta/docker_auth/auth_server/api"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"math/rand"
 	"net/http"
 	"os"
@@ -52,7 +54,7 @@ func stringToUint16(s string) uint16 {
 	return uint16(v)
 }
 
-func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServer, httpdown.Server) {
+func ServeOnce(c *utils.Config, cf string, hd *httpdown.HTTP) (*server.AuthServer, httpdown.Server) {
 	glog.Infof("Config from %s (%d users, %d ACL static entries)", cf, len(c.Users), len(c.ACL))
 	as, err := server.NewAuthServer(c)
 	if err != nil {
@@ -66,7 +68,7 @@ func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServ
 		glog.Info("HTTP Strict Transport Security enabled")
 	}
 	if c.Server.TLSMinVersion != "" {
-		value, found := server.TLSVersionValues[c.Server.TLSMinVersion]
+		value, found := utils.TLSVersionValues[c.Server.TLSMinVersion]
 		if !found {
 			value = stringToUint16(c.Server.TLSMinVersion)
 		}
@@ -76,7 +78,7 @@ func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServ
 	if c.Server.TLSCurvePreferences != nil {
 		var values []tls.CurveID
 		for _, s := range c.Server.TLSCurvePreferences {
-			value, found := server.TLSCurveIDValues[s]
+			value, found := utils.TLSCurveIDValues[s]
 			if !found {
 				value = tls.CurveID(stringToUint16(s))
 			}
@@ -88,7 +90,7 @@ func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServ
 	if c.Server.TLSCipherSuites != nil {
 		var values []uint16
 		for _, s := range c.Server.TLSCipherSuites {
-			value, found := server.TLSCipherSuitesValues[s]
+			value, found := utils.TLSCipherSuitesValues[s]
 			if !found {
 				value = stringToUint16(s)
 			}
@@ -126,7 +128,7 @@ func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServ
 	}
 	hs := &http.Server{
 		Addr:      c.Server.ListenAddress,
-		Handler:   as,
+		Handler:   api.Srv,
 		TLSConfig: tlsConfig,
 	}
 
@@ -138,7 +140,7 @@ func ServeOnce(c *server.Config, cf string, hd *httpdown.HTTP) (*server.AuthServ
 	return as, s
 }
 
-func (rs *RestartableServer) Serve(c *server.Config) {
+func (rs *RestartableServer) Serve(c *utils.Config) {
 	rs.authServer, rs.hs = ServeOnce(c, rs.configFile, rs.hd)
 	rs.WatchConfig()
 }
@@ -172,7 +174,7 @@ func (rs *RestartableServer) WatchConfig() {
 		case ev := <-w.Events:
 			if ev.Op == fsnotify.Remove {
 				glog.Warningf("Config file disappeared, serving continues")
-				w.Remove(rs.configFile)
+				_ = w.Remove(rs.configFile)
 				watching, needRestart = false, false
 			} else if ev.Op == fsnotify.Write {
 				needRestart = true
@@ -180,7 +182,7 @@ func (rs *RestartableServer) WatchConfig() {
 		case s := <-stopSignals:
 			signal.Stop(stopSignals)
 			glog.Infof("Signal: %s", s)
-			rs.hs.Stop()
+			_ = rs.hs.Stop()
 			rs.authServer.Stop()
 			glog.Exitf("Exiting")
 		}
@@ -189,7 +191,7 @@ func (rs *RestartableServer) WatchConfig() {
 
 func (rs *RestartableServer) MaybeRestart() {
 	glog.Infof("Validating new config")
-	c, err := server.LoadConfig(rs.configFile)
+	c, err := utils.LoadConfig(rs.configFile)
 	if err != nil {
 		glog.Errorf("Failed to reload config (server not restarted): %s", err)
 		return
@@ -211,7 +213,9 @@ func main() {
 	if cf == "" {
 		glog.Exitf("Config file not specified")
 	}
-	c, err := server.LoadConfig(cf)
+	flag.Set("v", "5")
+	flag.Set("alsologtostderr", "true")
+	c, err := utils.LoadConfig(cf)
 	if err != nil {
 		glog.Exitf("Failed to load config: %s", err)
 	}

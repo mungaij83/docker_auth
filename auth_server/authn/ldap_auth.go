@@ -20,37 +20,19 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"io/ioutil"
 	"strings"
 
 	"github.com/cesanta/glog"
 	"github.com/go-ldap/ldap"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type LabelMap struct {
-	Attribute string `yaml:"attribute,omitempty"`
-	ParseCN   bool   `yaml:"parse_cn,omitempty"`
-}
-
-type LDAPAuthConfig struct {
-	Addr                  string              `yaml:"addr,omitempty"`
-	TLS                   string              `yaml:"tls,omitempty"`
-	InsecureTLSSkipVerify bool                `yaml:"insecure_tls_skip_verify,omitempty"`
-	CACertificate         string              `yaml:"ca_certificate,omitempty"`
-	Base                  string              `yaml:"base,omitempty"`
-	Filter                string              `yaml:"filter,omitempty"`
-	BindDN                string              `yaml:"bind_dn,omitempty"`
-	BindPasswordFile      string              `yaml:"bind_password_file,omitempty"`
-	LabelMaps             map[string]LabelMap `yaml:"labels,omitempty"`
-}
-
 type LDAPAuth struct {
-	config *LDAPAuthConfig
+	config *utils.LDAPAuthConfig
 }
 
-func NewLDAPAuth(c *LDAPAuthConfig) (*LDAPAuth, error) {
+func NewLDAPAuth(c *utils.LDAPAuthConfig) (*LDAPAuth, error) {
 	if c.TLS == "" && strings.HasSuffix(c.Addr, ":636") {
 		c.TLS = "always"
 	}
@@ -60,18 +42,20 @@ func NewLDAPAuth(c *LDAPAuthConfig) (*LDAPAuth, error) {
 }
 
 //How to authenticate user, please refer to https://github.com/go-ldap/ldap/blob/master/example_test.go#L166
-func (la *LDAPAuth) Authenticate(account string, password api.PasswordString) (bool, api.Labels, error) {
+func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString) (bool, utils.Labels, error) {
 	if account == "" || password == "" {
-		return false, nil, api.NoMatch
+		return false, nil, utils.NoMatch
 	}
 	l, err := la.ldapConnection()
 	if err != nil {
+		glog.V(1).Infof("Failed to get connection: %v", err)
 		return false, nil, err
 	}
 	defer l.Close()
 
 	// First bind with a read only user, to prevent the following search won't perform any write action
 	if bindErr := la.bindReadOnlyUser(l); bindErr != nil {
+		glog.V(1).Infof("Failed to bind read-only user: %v", bindErr)
 		return false, nil, bindErr
 	}
 
@@ -81,17 +65,21 @@ func (la *LDAPAuth) Authenticate(account string, password api.PasswordString) (b
 
 	labelAttributes, labelsConfigErr := la.getLabelAttributes()
 	if labelsConfigErr != nil {
+		glog.V(1).Infof("Failed to get label attributes: %v", labelsConfigErr)
 		return false, nil, labelsConfigErr
 	}
-
+	glog.V(1).Infof("Label attributes: %v<=> %v", labelAttributes, filter)
 	accountEntryDN, entryAttrMap, uSearchErr := la.ldapSearch(l, &la.config.Base, &filter, &labelAttributes)
 	if uSearchErr != nil {
+		glog.V(1).Infof("Failed to search: %v", uSearchErr)
 		return false, nil, uSearchErr
 	}
+	glog.V(1).Infof("Attribute map[%v],%v", accountEntryDN, entryAttrMap)
 	if accountEntryDN == "" {
-		return false, nil, api.NoMatch // User does not exist
+		return false, nil, utils.NoMatch // User does not exist
 	}
 
+	glog.V(1).Infof("Entry map: %v", entryAttrMap)
 	// Bind as the user to verify their password
 	if len(accountEntryDN) > 0 {
 		err := l.Bind(accountEntryDN, string(password))
@@ -113,18 +101,38 @@ func (la *LDAPAuth) Authenticate(account string, password api.PasswordString) (b
 		return false, nil, labelsExtractErr
 	}
 
+	// Rebind as the read only user for any futher queries
+	if bindErr := la.bindReadOnlyUser(l); bindErr != nil {
+		glog.V(1).Infof("Groups map: %v", )
+		return false, nil, bindErr
+	}
+	// gFilter:=la.getGroupFilter(account)
+	// // Extract roles(scope) from user account
+	// accountRoles, groupAttrMap, gSearchErr := la.ldapSearch(l, &la.config.Base, &gFilter, &labelAttributes)
+	// if gSearchErr != nil {
+	// 	glog.V(2).Infof("Group Error: %v",gSearchErr)
+	// 	return false, nil, gSearchErr
+	// }
+	// glog.V(1).Infof("Groups map[%v]: %v",account,accountRoles,groupAttrMap)
 	return true, labels, nil
 }
 
 func (la *LDAPAuth) bindReadOnlyUser(l *ldap.Conn) error {
 	if la.config.BindDN != "" {
-		password, err := ioutil.ReadFile(la.config.BindPasswordFile)
-		if err != nil {
-			return err
+		var password_str string
+		if la.config.BindPasswordFile != "" {
+			password, err := ioutil.ReadFile(la.config.BindPasswordFile)
+			if err != nil {
+				return err
+
+			}
+			password_str = strings.TrimSpace(string(password))
+		} else {
+			password_str = strings.TrimSpace(la.config.BindPassword)
 		}
-		password_str := strings.TrimSpace(string(password))
+		glog.V(2).Infof("Password: %s", password_str)
 		glog.V(2).Infof("Bind read-only user (DN = %s)", la.config.BindDN)
-		err = l.Bind(la.config.BindDN, password_str)
+		err := l.Bind(la.config.BindDN, password_str)
 		if err != nil {
 			return err
 		}
@@ -200,6 +208,11 @@ func (la *LDAPAuth) getFilter(account string) string {
 	glog.V(2).Infof("search filter is %s", filter)
 	return filter
 }
+func (la *LDAPAuth) getGroupFilter(account string) string {
+	filter := strings.NewReplacer("${account}", account).Replace(la.config.GroupFilter)
+	glog.V(2).Infof("Group filter is %s", filter)
+	return filter
+}
 
 //ldap search and return required attributes' value from searched entries
 //default return entry's DN value if you leave attrs array empty
@@ -216,6 +229,7 @@ func (la *LDAPAuth) ldapSearch(l *ldap.Conn, baseDN *string, filter *string, att
 		nil)
 	sr, err := l.Search(searchRequest)
 	if err != nil {
+		glog.V(2).Infof("Failed to search: %v", err)
 		return "", nil, err
 	}
 

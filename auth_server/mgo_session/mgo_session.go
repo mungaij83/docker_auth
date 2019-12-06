@@ -19,39 +19,17 @@ package mgo_session
 import (
 	"crypto/tls"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
+	"github.com/cesanta/glog"
+	"gopkg.in/mgo.v2"
 	"io/ioutil"
 	"net"
 	"strings"
-	"time"
-
-	"github.com/cesanta/glog"
-	"gopkg.in/mgo.v2"
 )
 
-// Config stores how to connect to the MongoDB server and an optional password file
-type Config struct {
-	DialInfo     mgo.DialInfo `yaml:",inline"`
-	PasswordFile string       `yaml:"password_file,omitempty"`
-	EnableTLS    bool         `yaml:"enable_tls,omitempty"`
-}
 
-// Validate ensures the most common fields inside the mgo.DialInfo portion of
-// a Config are set correctly as well as other fields inside the
-// Config itself.
-func (c *Config) Validate(configKey string) error {
-	if len(c.DialInfo.Addrs) == 0 {
-		return fmt.Errorf("At least one element in %s.dial_info.addrs is required", configKey)
-	}
-	if c.DialInfo.Timeout == 0 {
-		c.DialInfo.Timeout = 10 * time.Second
-	}
-	if c.DialInfo.Database == "" {
-		return fmt.Errorf("%s.dial_info.database is required", configKey)
-	}
-	return nil
-}
 
-func New(c *Config) (*mgo.Session, error) {
+func New(c *utils.MongoConfig) (*mgo.Session, error) {
 	// Attempt to create a MongoDB session which we can re-use when handling
 	// multiple requests. We can optionally read in the password from a file or directly from the config.
 

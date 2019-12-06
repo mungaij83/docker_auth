@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -29,75 +30,16 @@ import (
 	"time"
 
 	"github.com/cesanta/glog"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type GitHubTeamCollection []GitHubTeam
-
-type GitHubTeam struct {
-	Id           int64               `json:"id"`
-	Url          string              `json:"url,omitempty"`
-	Name         string              `json:"name,omitempty"`
-	Slug         string              `json:"slug,omitempty"`
-	Organization *GitHubOrganization `json:"organization"`
-	Parent       *ParentGitHubTeam   `json:"parent,omitempty"`
-}
-
-type GitHubOrganization struct {
-	Login string `json:"login"`
-	Id    int64  `json:"id,omitempty"`
-}
-
-type ParentGitHubTeam struct {
-	Id   int64  `json:"id"`
-	Name string `json:"name,omitempty"`
-	Slug string `json:"slug,omitempty"`
-}
-
-type GitHubAuthConfig struct {
-	Organization     string                `yaml:"organization,omitempty"`
-	ClientId         string                `yaml:"client_id,omitempty"`
-	ClientSecret     string                `yaml:"client_secret,omitempty"`
-	ClientSecretFile string                `yaml:"client_secret_file,omitempty"`
-	TokenDB          string                `yaml:"token_db,omitempty"`
-	GCSTokenDB       *GitHubGCSStoreConfig `yaml:"gcs_token_db,omitempty"`
-	HTTPTimeout      time.Duration         `yaml:"http_timeout,omitempty"`
-	RevalidateAfter  time.Duration         `yaml:"revalidate_after,omitempty"`
-	GithubWebUri     string                `yaml:"github_web_uri,omitempty"`
-	GithubApiUri     string                `yaml:"github_api_uri,omitempty"`
-	RegistryUrl      string                `yaml:"registry_url,omitempty"`
-}
-
-type GitHubGCSStoreConfig struct {
-	Bucket           string `yaml:"bucket,omitempty"`
-	ClientSecretFile string `yaml:"client_secret_file,omitempty"`
-}
-
-type GitHubAuthRequest struct {
-	Action string `json:"action,omitempty"`
-	Code   string `json:"code,omitempty"`
-	Token  string `json:"token,omitempty"`
-}
-
-type GitHubTokenUser struct {
-	Login string `json:"login,omitempty"`
-	Email string `json:"email,omitempty"`
-}
+type GitHubTeamCollection []utils.GitHubTeam
 
 type GitHubAuth struct {
-	config     *GitHubAuthConfig
+	config     *utils.GitHubAuthConfig
 	db         TokenDB
 	client     *http.Client
 	tmpl       *template.Template
 	tmplResult *template.Template
-}
-
-type linkHeader struct {
-	First string
-	Last  string
-	Next  string
-	Prev  string
 }
 
 func execGHExperimentalApiRequest(url string, token string) (*http.Response, error) {
@@ -134,8 +76,8 @@ func removeSubstringsFromString(sourceStr string, stringsToStrip []string) strin
 //
 // https://developer.github.com/v3/guides/traversing-with-pagination/
 //
-func parseLinkHeader(linkLines []string) (linkHeader, error) {
-	var lH linkHeader
+func parseLinkHeader(linkLines []string) (utils.LinkHeader, error) {
+	var lH utils.LinkHeader
 	// URL in link is enclosed in < >
 	stringsToRemove := []string{"<", ">"}
 
@@ -159,7 +101,7 @@ func parseLinkHeader(linkLines []string) (linkHeader, error) {
 	return lH, nil
 }
 
-func NewGitHubAuth(c *GitHubAuthConfig) (*GitHubAuth, error) {
+func NewGitHubAuth(c *utils.GitHubAuthConfig) (*GitHubAuth, error) {
 	var db TokenDB
 	var err error
 	dbName := c.TokenDB
@@ -255,7 +197,7 @@ func (gha *GitHubAuth) doGitHubAuthCreateToken(rw http.ResponseWriter, code stri
 	resp.Body.Close()
 	glog.V(2).Infof("Code to token resp: %s", strings.Replace(string(codeResp), "\n", " ", -1))
 
-	var c2t CodeToTokenResponse
+	var c2t utils.CodeToTokenResponse
 	err = json.Unmarshal(codeResp, &c2t)
 	if err != nil || c2t.Error != "" || c2t.ErrorDescription != "" {
 		var et string
@@ -316,7 +258,7 @@ func (gha *GitHubAuth) validateAccessToken(token string) (user string, err error
 	body, _ := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	var ti GitHubTokenUser
+	var ti utils.GitHubTokenUser
 	err = json.Unmarshal(body, &ti)
 	if err != nil {
 		err = fmt.Errorf("could not unmarshal token user info %q: %s", string(body), err)
@@ -467,7 +409,7 @@ func (gha *GitHubAuth) validateServerToken(user string) (*TokenDBValue, error) {
 	return v, nil
 }
 
-func (gha *GitHubAuth) Authenticate(user string, password api.PasswordString) (bool, api.Labels, error) {
+func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
 	err := gha.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = gha.validateServerToken(user)
@@ -490,7 +432,7 @@ func (gha *GitHubAuth) Authenticate(user string, password api.PasswordString) (b
 }
 
 func (gha *GitHubAuth) Stop() {
-	gha.db.Close()
+	_ = gha.db.Close()
 	glog.Info("Token DB closed")
 }
 

@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package server
+package utils
 
 import (
 	"crypto/tls"
@@ -27,26 +27,23 @@ import (
 	"time"
 
 	"github.com/docker/libtrust"
-	yaml "gopkg.in/yaml.v2"
-
-	"github.com/cesanta/docker_auth/auth_server/authn"
-	"github.com/cesanta/docker_auth/auth_server/authz"
+	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
-	Server      ServerConfig                   `yaml:"server"`
-	Token       TokenConfig                    `yaml:"token"`
-	Users       map[string]*authn.Requirements `yaml:"users,omitempty"`
-	GoogleAuth  *authn.GoogleAuthConfig        `yaml:"google_auth,omitempty"`
-	GitHubAuth  *authn.GitHubAuthConfig        `yaml:"github_auth,omitempty"`
-	LDAPAuth    *authn.LDAPAuthConfig          `yaml:"ldap_auth,omitempty"`
-	MongoAuth   *authn.MongoAuthConfig         `yaml:"mongo_auth,omitempty"`
-	ExtAuth     *authn.ExtAuthConfig           `yaml:"ext_auth,omitempty"`
-	PluginAuthn *authn.PluginAuthnConfig       `yaml:"plugin_authn,omitempty"`
-	ACL         authz.ACL                      `yaml:"acl,omitempty"`
-	ACLMongo    *authz.ACLMongoConfig          `yaml:"acl_mongo,omitempty"`
-	ExtAuthz    *authz.ExtAuthzConfig          `yaml:"ext_authz,omitempty"`
-	PluginAuthz *authz.PluginAuthzConfig       `yaml:"plugin_authz,omitempty"`
+	Server      ServerConfig             `yaml:"server"`
+	Token       TokenConfig              `yaml:"token"`
+	Users       map[string]*Requirements `yaml:"users,omitempty"`
+	GoogleAuth  *GoogleAuthConfig        `yaml:"google_auth,omitempty"`
+	GitHubAuth  *GitHubAuthConfig        `yaml:"github_auth,omitempty"`
+	LDAPAuth    *LDAPAuthConfig          `yaml:"ldap_auth,omitempty"`
+	MongoAuth   *MongoAuthConfig         `yaml:"mongo_auth,omitempty"`
+	ExtAuth     *ExtAuthConfig           `yaml:"ext_auth,omitempty"`
+	PluginAuthn *PluginAuthnConfig       `yaml:"plugin_authn,omitempty"`
+	ACL         ACL                      `yaml:"acl,omitempty"`
+	ACLMongo    *ACLMongoConfig          `yaml:"acl_mongo,omitempty"`
+	ExtAuthz    *ExtAuthzConfig          `yaml:"ext_authz,omitempty"`
+	PluginAuthz *PluginAuthzConfig       `yaml:"plugin_authz,omitempty"`
 }
 
 type ServerConfig struct {
@@ -80,6 +77,14 @@ type TokenConfig struct {
 
 	publicKey  libtrust.PublicKey
 	privateKey libtrust.PrivateKey
+}
+
+func (t *TokenConfig) GetPublicKey() libtrust.PublicKey {
+	return t.publicKey
+}
+
+func (t *TokenConfig) GetPrivateKey() libtrust.PrivateKey {
+	return t.privateKey
 }
 
 // TLSCipherSuitesValues maps CipherSuite names as strings to the actual values
@@ -128,7 +133,7 @@ var TLSVersionValues = map[string]uint16{
 	"TLS13": tls.VersionTLS13,
 	// Deprecated: SSLv3 is cryptographically broken, and will be
 	// removed in Go 1.14. See golang.org/issue/32716.
-	"SSL30": tls.VersionSSL30,
+	//"SSL30": tls.VersionSSL30,
 }
 
 // TLSCurveIDValues maps CurveID names as strings to the actual values in the
@@ -213,7 +218,7 @@ func validate(c *Config) error {
 	}
 
 	if c.ACL != nil {
-		if err := authz.ValidateACL(c.ACL); err != nil {
+		if err := ValidateACL(c.ACL); err != nil {
 			return fmt.Errorf("invalid ACL: %s", err)
 		}
 	}

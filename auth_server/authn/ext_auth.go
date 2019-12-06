@@ -19,19 +19,14 @@ package authn
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"os/exec"
 	"strings"
 	"syscall"
 
 	"github.com/cesanta/glog"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type ExtAuthConfig struct {
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args"`
-}
 
 type ExtAuthStatus int
 
@@ -43,29 +38,20 @@ const (
 )
 
 type ExtAuthResponse struct {
-	Labels api.Labels `json:"labels,omitempty"`
+	Labels utils.Labels `json:"labels,omitempty"`
 }
 
-func (c *ExtAuthConfig) Validate() error {
-	if c.Command == "" {
-		return fmt.Errorf("command is not set")
-	}
-	if _, err := exec.LookPath(c.Command); err != nil {
-		return fmt.Errorf("invalid command %q: %s", c.Command, err)
-	}
-	return nil
-}
 
 type extAuth struct {
-	cfg *ExtAuthConfig
+	cfg *utils.ExtAuthConfig
 }
 
-func NewExtAuth(cfg *ExtAuthConfig) *extAuth {
+func NewExtAuth(cfg *utils.ExtAuthConfig) *extAuth {
 	glog.Infof("External authenticator: %s %s", cfg.Command, strings.Join(cfg.Args, " "))
 	return &extAuth{cfg: cfg}
 }
 
-func (ea *extAuth) Authenticate(user string, password api.PasswordString) (bool, api.Labels, error) {
+func (ea *extAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
 	cmd := exec.Command(ea.cfg.Command, ea.cfg.Args...)
 	cmd.Stdin = strings.NewReader(fmt.Sprintf("%s %s", user, string(password)))
 	output, err := cmd.Output()
@@ -92,7 +78,7 @@ func (ea *extAuth) Authenticate(user string, password api.PasswordString) (bool,
 	case ExtAuthDenied:
 		return false, nil, nil
 	case ExtAuthNoMatch:
-		return false, nil, api.NoMatch
+		return false, nil, utils.NoMatch
 	default:
 		glog.Errorf("Ext command error: %d %s", es, et)
 	}

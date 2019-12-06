@@ -19,19 +19,14 @@ package authz
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"os/exec"
 	"strings"
 	"syscall"
 
 	"github.com/cesanta/glog"
-
-	"github.com/cesanta/docker_auth/auth_server/api"
 )
 
-type ExtAuthzConfig struct {
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args"`
-}
 
 type ExtAuthzStatus int
 
@@ -41,26 +36,18 @@ const (
 	ExtAuthzError   ExtAuthzStatus = 2
 )
 
-func (c *ExtAuthzConfig) Validate() error {
-	if c.Command == "" {
-		return fmt.Errorf("command is not set")
-	}
-	if _, err := exec.LookPath(c.Command); err != nil {
-		return fmt.Errorf("invalid command %q: %s", c.Command, err)
-	}
-	return nil
-}
+
 
 type ExtAuthz struct {
-	cfg *ExtAuthzConfig
+	cfg *utils.ExtAuthzConfig
 }
 
-func NewExtAuthzAuthorizer(cfg *ExtAuthzConfig) *ExtAuthz {
+func NewExtAuthzAuthorizer(cfg *utils.ExtAuthzConfig) *ExtAuthz {
 	glog.Infof("External authorization: %s %s", cfg.Command, strings.Join(cfg.Args, " "))
 	return &ExtAuthz{cfg: cfg}
 }
 
-func (ea *ExtAuthz) Authorize(ai *api.AuthRequestInfo) ([]string, error) {
+func (ea *ExtAuthz) Authorize(ai *utils.AuthRequestInfo) ([]string, error) {
 	aiMarshal, err := json.Marshal(ai)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to json.Marshal AuthRequestInfo: %s", err)
