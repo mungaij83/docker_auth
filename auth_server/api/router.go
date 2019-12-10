@@ -8,6 +8,7 @@ import (
 
 var Srv *mux.Router
 var Auth *app.AuthService
+var OAuth2 *app.Oauth2Auth
 
 func NewApiRouter(c *utils.Config) error {
 	Srv = mux.NewRouter()
@@ -16,6 +17,12 @@ func NewApiRouter(c *utils.Config) error {
 	if err != nil {
 		return err
 	}
+	// Initialize Oauth 2
+	OAuth2, err = app.NewOauth2(c,Auth)
+	if err != nil {
+		return err
+	}
 	InitAuth()
+	InitAuth2()
 	return nil
 }

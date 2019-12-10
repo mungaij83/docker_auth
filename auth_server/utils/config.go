@@ -44,6 +44,7 @@ type Config struct {
 	ACLMongo    *ACLMongoConfig          `yaml:"acl_mongo,omitempty"`
 	ExtAuthz    *ExtAuthzConfig          `yaml:"ext_authz,omitempty"`
 	PluginAuthz *PluginAuthzConfig       `yaml:"plugin_authz,omitempty"`
+	Oauth2      *Oauth2Config            `yaml:"oauth_2"`
 }
 
 type ServerConfig struct {
@@ -70,13 +71,18 @@ type LetsEncryptConfig struct {
 }
 
 type TokenConfig struct {
-	Issuer     string `yaml:"issuer,omitempty"`
-	CertFile   string `yaml:"certificate,omitempty"`
-	KeyFile    string `yaml:"key,omitempty"`
-	Expiration int64  `yaml:"expiration,omitempty"`
+	Issuer      string `yaml:"issuer,omitempty"`
+	CertFile    string `yaml:"certificate,omitempty"`
+	KeyFile     string `yaml:"key,omitempty"`
+	AltCertFile string `yaml:"alt_certificate,omitempty"`
+	AltKeyFile  string `yaml:"alt_key,omitempty"`
+	Expiration  int64  `yaml:"expiration,omitempty"`
 
 	publicKey  libtrust.PublicKey
 	privateKey libtrust.PrivateKey
+
+	alternatePrivateKey libtrust.PrivateKey
+	alternatePublicKey  libtrust.PublicKey
 }
 
 func (t *TokenConfig) GetPublicKey() libtrust.PublicKey {
@@ -85,6 +91,14 @@ func (t *TokenConfig) GetPublicKey() libtrust.PublicKey {
 
 func (t *TokenConfig) GetPrivateKey() libtrust.PrivateKey {
 	return t.privateKey
+}
+
+func (t *TokenConfig) GetAltPublicKey() libtrust.PublicKey {
+	return t.alternatePublicKey
+}
+
+func (t *TokenConfig) GetAltPrivateKey() libtrust.PrivateKey {
+	return t.alternatePrivateKey
 }
 
 // TLSCipherSuitesValues maps CipherSuite names as strings to the actual values
@@ -286,6 +300,7 @@ func LoadConfig(fileName string) (*Config, error) {
 		}
 		serverConfigured = true
 	}
+
 	tokenConfigured := false
 	if c.Token.CertFile != "" || c.Token.KeyFile != "" {
 		// Check for partial configuration.
@@ -295,6 +310,14 @@ func LoadConfig(fileName string) (*Config, error) {
 		c.Token.publicKey, c.Token.privateKey, err = loadCertAndKey(c.Token.CertFile, c.Token.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load token cert and key: %s", err)
+		}
+
+		// Load refresh token cert files, optional
+		if ! (c.Token.AltCertFile == "" || c.Token.AltKeyFile == "") {
+			c.Token.alternatePublicKey, c.Token.alternatePrivateKey, err = loadCertAndKey(c.Token.AltCertFile, c.Token.AltKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load alternate token cert and key: %s", err)
+			}
 		}
 		tokenConfigured = true
 	}

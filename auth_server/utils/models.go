@@ -15,6 +15,48 @@ type AuthRequest struct {
 	Scopes         []AuthScope
 	Labels         Labels
 }
+type AuthDetails struct {
+	Username          string
+	Password          string
+	ClientId          string
+	ClientSecret      string
+	Scope             string
+	AuthorizationCode string
+	ResponseType      string
+	RemoteAddress     string
+	Validation        bool
+}
+
+type TokenDetails struct {
+	ClientId     string
+	RequestType  string
+	AccessToken  string
+	RefreshToken string
+	ServiceName  string
+}
+
+func (a AuthDetails) Validate() (StringMap, bool) {
+	errorList := StringMap{}
+	if len(a.ClientId) <= 0 {
+		errorList.Add("client_id", "Invalid client id")
+	}
+
+	if !a.Validation && len(a.ClientSecret) <= 0 {
+		errorList.Add("client_secret", "Please provide client secret")
+	}
+
+	if !a.Validation && len(a.Password) <= 0 {
+		errorList.Add("password", "Please enter password")
+	}
+
+	if !a.Validation && len(a.Username) <= 0 {
+		errorList.Add("password", "Please enter username")
+	}
+	if len(a.ResponseType) <= 0 {
+		errorList.Add("response_type", "Invalid response type")
+	}
+	return errorList, len(errorList) == 0
+}
 
 type AuthScope struct {
 	Type    string
@@ -120,9 +162,3 @@ type LabelMap struct {
 	Attribute string `yaml:"attribute,omitempty"`
 	ParseCN   bool   `yaml:"parse_cn,omitempty"`
 }
-
-
-
-
-
-

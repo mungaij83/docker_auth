@@ -39,11 +39,13 @@ var ExpiredToken = errors.New("expired token")
 type TokenDB interface {
 	// GetValue takes a username returns the corresponding token
 	GetValue(string) (*TokenDBValue, error)
-
+	// Get data
+	GetData(string, string) (utils.StringMap, error)
 	// StoreToken takes a username and token, stores them in the DB
 	// and returns a password and error
 	StoreToken(string, *TokenDBValue, bool) (string, error)
-
+	// Store JSON data
+	StoreData(user string, namespace string, v interface{}) error
 	// ValidateTOken takes a username and password
 	// and returns an error
 	ValidateToken(string, utils.PasswordString) error
@@ -51,7 +53,8 @@ type TokenDB interface {
 	// DeleteToken takes a username
 	// and deletes the corresponding token from the DB
 	DeleteToken(string) error
-
+	// Dalete from key space
+	DeleteTokenNs(string, string) error
 	// Composed from leveldb.DB
 	Close() error
 }
@@ -69,7 +72,7 @@ type TokenDBValue struct {
 	ValidUntil   time.Time `json:"valid_until,omitempty"`
 	// DockerPassword is the temporary password we use to authenticate Docker users.
 	// Generated at the time of token creation, stored here as a BCrypt hash.
-	DockerPassword string     `json:"docker_password,omitempty"`
+	DockerPassword string       `json:"docker_password,omitempty"`
 	Labels         utils.Labels `json:"labels,omitempty"`
 }
 
@@ -82,7 +85,7 @@ func NewTokenDB(file string) (TokenDB, error) {
 }
 
 func (db *TokenDBImpl) GetValue(user string) (*TokenDBValue, error) {
-	valueStr, err := db.Get(getDBKey(user), nil)
+	valueStr, err := db.Get(getDBKey(user, tokenDBPrefix), nil)
 	switch {
 	case err == leveldb.ErrNotFound:
 		return nil, nil
@@ -99,6 +102,24 @@ func (db *TokenDBImpl) GetValue(user string) (*TokenDBValue, error) {
 	return &dbv, nil
 }
 
+func (db *TokenDBImpl) GetData(key string, prefix string) (utils.StringMap, error) {
+	valueStr, err := db.Get(getDBKey(key, prefix), nil)
+	switch {
+	case err == leveldb.ErrNotFound:
+		return nil, nil
+	case err != nil:
+		glog.Errorf("error accessing token db: %s", err)
+		return nil, fmt.Errorf("error accessing token db: %s", err)
+	}
+	var dbv utils.StringMap
+	err = json.Unmarshal(valueStr, &dbv)
+	if err != nil {
+		glog.Errorf("bad DB value for %q (%q): %s", key, string(valueStr), err)
+		return nil, fmt.Errorf("bad DB value due: %v", err)
+	}
+	return dbv, nil
+}
+
 func (db *TokenDBImpl) StoreToken(user string, v *TokenDBValue, updatePassword bool) (dp string, err error) {
 	if updatePassword {
 		dp = uniuri.New()
@@ -110,12 +131,25 @@ func (db *TokenDBImpl) StoreToken(user string, v *TokenDBValue, updatePassword b
 	if err != nil {
 		return "", err
 	}
-	err = db.Put(getDBKey(user), data, nil)
+	err = db.Put(getDBKey(user, tokenDBPrefix), data, nil)
 	if err != nil {
 		glog.Errorf("failed to set token data for %s: %s", user, err)
 	}
 	glog.V(2).Infof("Server tokens for %s: %s", user, string(data))
 	return
+}
+
+func (db *TokenDBImpl) StoreData(user string, namespace string, v interface{}) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	err = db.Put(getDBKey(user, namespace), data, nil)
+	if err != nil {
+		glog.Errorf("failed to set token data for %s: %s", user, err)
+	}
+	glog.V(2).Infof("Server tokens for %s: %s", user, string(data))
+	return err
 }
 
 func (db *TokenDBImpl) ValidateToken(user string, password utils.PasswordString) error {
@@ -137,12 +171,20 @@ func (db *TokenDBImpl) ValidateToken(user string, password utils.PasswordString)
 
 func (db *TokenDBImpl) DeleteToken(user string) error {
 	glog.V(1).Infof("deleting token for %s", user)
-	if err := db.Delete(getDBKey(user), nil); err != nil {
+	if err := db.Delete(getDBKey(user, tokenDBPrefix), nil); err != nil {
 		return fmt.Errorf("failed to delete %s: %s", user, err)
 	}
 	return nil
 }
 
-func getDBKey(user string) []byte {
-	return []byte(fmt.Sprintf("%s%s", tokenDBPrefix, user))
+func (db *TokenDBImpl) DeleteTokenNs(user, namespace string) error {
+	glog.V(1).Infof("deleting token for %s", user)
+	if err := db.Delete(getDBKey(user, namespace), nil); err != nil {
+		return fmt.Errorf("failed to delete %s: %s", user, err)
+	}
+	return nil
+}
+
+func getDBKey(user string, prefix string) []byte {
+	return []byte(fmt.Sprintf("%s%s", prefix, user))
 }

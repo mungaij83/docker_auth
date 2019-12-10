@@ -1,12 +1,12 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/authn"
 	"github.com/cesanta/docker_auth/auth_server/authz"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
-	"github.com/docker/distribution/registry/auth/token"
 	"math/rand"
 	"net"
 	"net/http"
@@ -21,12 +21,14 @@ type AuthService struct {
 	authorizers    []utils.Authorizer
 	ga             *authn.GoogleAuth
 	gha            *authn.GitHubAuth
+	jwt            Jwt
 }
 
 // Authorization service initialization
 func NewAuthService(c *utils.Config) (*AuthService, error) {
 	as := &AuthService{
 		config:      c,
+		jwt:         Jwt{},
 		authorizers: make([]utils.Authorizer, 0),
 	}
 	if c.ACL != nil {
@@ -240,22 +242,36 @@ func (as *AuthService) Authorize(ar *utils.AuthRequest) ([]utils.AuthzResult, er
 
 // https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
 func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (string, error) {
-	now := time.Now().Unix()
+	payload, sigAlg, err := as.GetClaims(ar, ares)
+	if err != nil {
+		return "", err
+	}
 	tc := &as.config.Token
 
+	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
+	if err != nil || sigAlg2 != sigAlg {
+		return "", fmt.Errorf("failed to sign token: %s", err)
+	}
+	glog.Infof("New token for %s %+v", *ar, ar.Labels)
+	return fmt.Sprintf("%s%s%s", payload, TokenSeparator, utils.JsonBase64UrlEncode(sig)), nil
+}
+
+func (as *AuthService) GetClaims(ar *utils.AuthRequest, ares []utils.AuthzResult) (string, string, error) {
+	now := time.Now().Unix()
+	tc := &as.config.Token
 	// Sign something dummy to find out which algorithm is used.
 	_, sigAlg, err := tc.GetPrivateKey().Sign(strings.NewReader("dummy"), 0)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign: %s", err)
+		return "", sigAlg, err
 	}
-	header := token.Header{
+	header := JwtHeader{
 		Type:       "JWT",
 		SigningAlg: sigAlg,
 		KeyID:      tc.GetPublicKey().KeyID(),
 	}
 	headerJSON := utils.ToJson(header)
 
-	claims := token.ClaimSet{
+	claims := JwtClaims{
 		Issuer:     tc.Issuer,
 		Subject:    ar.Account,
 		Audience:   ar.Service,
@@ -263,10 +279,10 @@ func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResu
 		IssuedAt:   now,
 		Expiration: now + tc.Expiration,
 		JWTID:      fmt.Sprintf("%d", rand.Int63()),
-		Access:     []*token.ResourceActions{},
+		Access:     []*JwtResourceAccess{},
 	}
 	for _, a := range ares {
-		ra := &token.ResourceActions{
+		ra := &JwtResourceAccess{
 			Type:    a.Scope.Type,
 			Name:    a.Scope.Name,
 			Actions: a.AutorizedActions,
@@ -279,14 +295,118 @@ func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResu
 	}
 	claimsJSON := utils.ToJson(claims)
 
-	payload := fmt.Sprintf("%s%s%s", utils.Base64UrlEncode(headerJSON), token.TokenSeparator, utils.Base64UrlEncode(claimsJSON))
+	payload := fmt.Sprintf("%s%s%s", as.jwt.EncodeSegment([]byte(headerJSON)), TokenSeparator, as.jwt.EncodeSegment([]byte(claimsJSON)))
+	return payload, sigAlg, nil
+}
+
+func (as *AuthService) CreateAuthorizationToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
+	payload, err := utils.RandomString(15)
+	tc := &as.config.Token
+	_, sigAlg, err := tc.GetPrivateKey().Sign(strings.NewReader("dummy"), 0)
+	if err != nil {
+		return nil, err
+	}
+	tokenResult := utils.StringMap{}
+	if err != nil {
+		return tokenResult, err
+	}
 
 	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
 	if err != nil || sigAlg2 != sigAlg {
-		return "", fmt.Errorf("failed to sign token: %s", err)
+		return tokenResult, fmt.Errorf("failed to sign token: %s", err)
 	}
-	glog.Infof("New token for %s %+v: %s", *ar, ar.Labels, claimsJSON)
-	return fmt.Sprintf("%s%s%s", payload, token.TokenSeparator, utils.JsonBase64UrlEncode(sig)), nil
+	tokenResult.Add("sub", ar.Account)
+	tokenResult.Add("algorithm", sigAlg)
+	tokenResult.Add("service", ar.Service)
+	tokenResult.Add(utils.AuthorizationCodeField, utils.JsonBase64UrlEncode(sig))
+	return tokenResult, nil
+}
+
+// https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
+func (as *AuthService) CreateOAuthToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
+	payload, sigAlg, err := as.GetClaims(ar, ares)
+	if err != nil {
+		return nil, err
+	}
+	glog.Infof("New token for %s %+v", *ar, ar.Labels)
+	return as.GenerateJWT(payload, sigAlg)
+}
+
+// Validate a JWT token
+func (as *AuthService) ValidateJWT(tokenStr, signAlg string, isAlt bool) (utils.StringMap, error) {
+	parts := strings.Split(tokenStr, TokenSeparator)
+	if len(parts) != 3 {
+		return nil, errors.New("invalid JWT token")
+	}
+
+	// Access token header
+	headerJson, err := as.jwt.DecodeSegment(parts[0])
+	if err != nil {
+		glog.V(2).Infof("Invalid header encoding: %v", err)
+		return nil, err
+	}
+	var header JwtHeader
+	err = utils.FromJson(string(headerJson), &header)
+	if err != nil {
+		return nil, err
+	}
+	// Refresh token header
+	claimJSON, err := as.jwt.DecodeSegment(parts[1])
+	if err != nil {
+		glog.V(2).Infof("Invalid body encoding: %v", err)
+		return nil, err
+	}
+	var claims JwtClaims
+	err = utils.FromJson(string(claimJSON), &claims)
+	if err != nil {
+		return nil, err
+	}
+	// Validate refresh or access token signature
+	signature := parts[2]
+	payload := fmt.Sprintf("%s%s%s", parts[0], TokenSeparator, parts[1])
+	ds, _ := as.jwt.DecodeSegment(signature)
+	if isAlt {
+		if as.config.Token.GetAltPublicKey() != nil {
+			return nil, errors.New("invalid refresh token key")
+		}
+		err = as.config.Token.GetAltPublicKey().Verify(strings.NewReader(payload), header.SigningAlg, ds)
+		if err != nil {
+			m := "invalid signature"
+			glog.V(2).Infof("%s:%v", m, err)
+			return nil, errors.New(m)
+		}
+	} else {
+		err = as.config.Token.GetPublicKey().Verify(strings.NewReader(payload), header.SigningAlg, ds)
+		if err != nil {
+			m := "invalid signature"
+			glog.V(2).Infof("%s:%v", m, err)
+			return nil, errors.New(m)
+		}
+	}
+	return utils.ToStringMap(&claims), nil
+}
+
+func (as *AuthService) GenerateJWT(payload string, sigAlg string) (utils.StringMap, error) {
+	tokenResult := utils.StringMap{}
+	var err error
+	if err != nil {
+		return tokenResult, err
+	}
+	tc := &as.config.Token
+	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
+	if err != nil || sigAlg2 != sigAlg {
+		return tokenResult, fmt.Errorf("failed to sign token: %s", err)
+	}
+	if tc.GetAltPrivateKey() != nil {
+		sigRefresh, _, err2 := tc.GetAltPrivateKey().Sign(strings.NewReader(payload), 0)
+		if err2 != nil {
+			return tokenResult, fmt.Errorf("failed to sign token: %s", err)
+		}
+		// Add access token and refresh token
+		tokenResult.Add("refresh_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sigRefresh)))
+	}
+	tokenResult.Add("access_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sig)))
+	return tokenResult, nil
 }
 
 func (as *AuthService) GetToken() utils.TokenConfig {

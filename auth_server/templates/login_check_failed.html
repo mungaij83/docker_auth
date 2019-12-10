@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+          integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <style>
+        .card {
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.19), 0 6px 6px rgba(0, 0, 0, 0.23);
+        }
+    </style>
+</head>
+<body>
+<div class="container pt-3">
+    <div class="row justify-content-sm-center">
+        <div class="col-sm-10 col-md-6">
+            <div class="card border-info">
+                <div class="card-header">Request failed</div>
+                <div class="card-body">
+                    <div class="row">
+                        <table class="table table-responsive table-dark">
+                            <thead>
+                            <th>Field</th>
+                            <th>Error</th>
+                            </thead>
+                            <tbody>
+                            {{range $k, $v:=.}}
+                            <tr>
+                                <td>{{$k}}</td>
+                                <td>{{$v}}</td>
+                            </tr>
+                            {{end}}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

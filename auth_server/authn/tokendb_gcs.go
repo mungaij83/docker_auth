@@ -43,6 +43,18 @@ type gcsTokenDB struct {
 	bucket string
 }
 
+func (db *gcsTokenDB) DeleteTokenNs(string, string) error {
+	panic("implement me")
+}
+
+func (db *gcsTokenDB) GetData(string, string) (utils.StringMap, error) {
+	panic("implement me")
+}
+
+func (db *gcsTokenDB) StoreData(user string, namespace string, v interface{}) error {
+	panic("implement me")
+}
+
 // GetValue gets token value associated with the provided user. Each user
 // in the bucket is having it's own file for tokens and it's recomanded bucket
 // to not be shared with other apps

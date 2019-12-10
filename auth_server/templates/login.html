@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Login</title>
+    <script
+            src="https://code.jquery.com/jquery-3.4.1.min.js"
+            integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+            crossorigin="anonymous">
+    </script>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+          integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <style>
+        .card {
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.19), 0 6px 6px rgba(0, 0, 0, 0.23);
+        }
+    </style>
+</head>
+<body>
+<div class="container pt-3">
+    <div class="row justify-content-sm-center">
+        <div class="col-sm-10 col-md-6">
+            <div class="card border-info">
+                <div class="card-header">Sign in to continue</div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 text-center">
+                            <img src="https://placeimg.com/128/128/tech/sepia">
+                            <h4 class="text-center">Devops</h4>
+                        </div>
+                        <div class="col-md-8">
+                            <form class="form-signin" id="login_form">
+                                <input type="text" class="form-control mb-2" name="client_id" placeholder="Username"
+                                       required autofocus>
+                                <input type="password" class="form-control mb-2" name="client_secret"
+                                       placeholder="Password" required>
+                                <button class="btn btn-lg btn-primary btn-block mb-1" type="submit">Sign in</button>
+                                <a href="#" class="float-right">Need help?</a>
+                            </form>
+                        </div>
+                        <div id="access_token" class="col-md-12">
+
+                        </div>
+                        <div id="access_token_err" class="col-md-12">
+
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    $("#login_form").submit(function (event) {
+        event.preventDefault();
+        let searchStr = window.location.search.replace("?", "");
+        let urlParams = new URLSearchParams(searchStr);
+        var data = {
+            'username': $('input[name=client_id]').val(),
+            'password': $('input[name=client_secret]').val()
+        };
+        // Add all url parameters
+        for ([k, value] of urlParams.entries()) {
+            data[k] = value;
+        }
+        // Make request
+        $.ajax({
+            url: '/auth/credentials/k8',
+            method: 'POST',
+            dataType: "json",
+            contentType: "application/json",
+            data: JSON.stringify(data),
+            encode: true
+        }).done(function (da, xhr) {
+            console.log(typeof da);
+            var x;
+            var txt = "<table class='table table-responsive table-dark'><thead class=\"thead-dark\">\n" +
+                "    <tr>\n" +
+                "      <th scope=\"col\">Key</th>\n" +
+                "      <th scope=\"col\">Value</th>\n" +
+                "    </tr>\n" +
+                "  </thead>";
+            Object.keys(da).forEach(function (key) {
+                txt += "<tr><td>" + key + "</td><td>" + da[key] + "</td></tr>";
+            });
+            txt += "</table>";
+            document.getElementById("access_token").innerHTML = txt;
+
+        }).fail(function (xhr, status) {
+            console.log(xhr);
+            if(xhr.responseJSON) {
+                document.getElementById("access_token").innerText = xhr.responseJSON.response_message;
+            }else{
+                document.getElementById("access_token").innerText = "Invalid login request";
+            }
+            console.log("Error: " + status)
+        });
+    });
+</script>
+</body>
+</html>
