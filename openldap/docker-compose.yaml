@@ -1,0 +1,60 @@
+version: "3.5"
+services:
+  ldap_server:
+    image: "osixia/openldap:1.3.0"
+    container_name: "openldap"
+    command: [--copy-service,  --loglevel, info]
+    environment:
+      LDAP_LOG_LEVEL: 256
+      LDAP_ORGANISATION: TechLab Ltd
+      LDAP_DOMAIN: techlab.com
+      LDAP_ADMIN_PASSWORD: SowMill
+      LDAP_CONFIG_PASSWORD: WowMill
+      LDAP_TLS: 'false'
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: "readonly"
+      LDAP_READONLY_USER_PASSWORD: "readonly_pw"
+      KEEP_EXISTING_CONFIG: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+    #tty: true
+    #stdin_open: true
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - /srv/docker/ldap/data:/var/lib/ldap
+      - /srv/docker/ldap/slapd.d:/etc/ldap/slapd.d
+      - /srv/docker/ldap/certs:/container/service/slapd/assets/certs/
+  lam_ldap:
+    image: ldapaccountmanager/lam:latest
+    container_name: lam_openldap
+    #entrypoint: [ls, -al,/etc/ldap-account-manager]
+    environment:
+      LDAP_TLS_PROTOCOL_MIN: "3.1"
+      LDAP_DOMAIN: "techlab.com"
+      LDAP_BASE_DN: "dn=techlab,dc=com"
+      LDAP_SERVER: "ldap://ldap_server:389"
+      LDAP_USER: "cn=admin,dc=techlab,dc=com"
+      LDAP_ADMIN_PASSWORD: "SowMill"
+      LAM_PASSWORD: "BowMill"
+      LDAP_ORGANISATION: "TechLab Demo"
+      LDAP_READONLY_USER_PASSWORD: "readonly_pw"
+    ports:
+      - "8081:80"
+    volumes:
+      - /srv/docker/lam/lam-data:/etc/ldap-account-manager
+      - /srv/docker/lam/var-lam:/var/lib/ldap-account-manager
+    depends_on:
+      - ldap_server
+  phpldapadmin:
+    image: osixia/phpldapadmin:latest
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: "openldap"
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8082:80"
+    depends_on:
+      - ldap_server

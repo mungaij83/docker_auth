@@ -10,7 +10,7 @@ token:
   expiration: 900
 ldap_auth:
   # Addr is the hostname:port or ip:port
-  addr: ldap.example.com:636
+  addr: techlab.com:636
   # Setup tls connection method to be
   # "" or "none": the communication won't be encrypted
   # "always": setup LDAP over SSL/TLS
@@ -25,9 +25,9 @@ ldap_auth:
   bind_dn:
   bind_password_file:
   # User query settings. ${account} is expanded from auth request 
-  base: o=sqilab.com
+  base: o=techlab.com
   filter: (&(uid=${account})(objectClass=orgInetPerson))
-  group_filter: (&(objectClass=groupOfNames)(member=cn=${account},ou=devops,dc=sqilab,dc=com))
+  group_filter: (&(objectClass=groupOfNames)(member=cn=${account},ou=devops,dc=techlab,dc=com))
 acl:
   # This will allow authenticated users to pull/push
   - match:
