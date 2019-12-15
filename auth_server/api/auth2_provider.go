@@ -6,7 +6,9 @@ import (
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 func InitAuth2() {
@@ -44,10 +46,15 @@ func HandleToken(c *app.Context, w http.ResponseWriter, r *http.Request) {
 	}
 	errorList, ok := client.Validate()
 	if ok {
+
 		// Generate OAuth 2 token
 		token, err := OAuth2.ValidateResponseCode(client)
 		if err != nil {
-			http.Error(w, "Failed to get token", http.StatusBadRequest)
+			glog.Infof("Access token error: %v", err)
+			response := app.ResultModel{}
+			response.ResponseMessage = err.Error()
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			app.WriteResult(w, response)
 		} else {
 			app.WriteResult(w, token)
 		}
@@ -89,7 +96,7 @@ func HandleLoginRequest(c *app.Context, w http.ResponseWriter, r *http.Request) 
 
 // Authorize client and generate authorization code
 func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Request) {
-	ar, err := Auth.ParseRequest(r, c.GetIp())
+	ar, err := Auth.ParseRequest(c, c.GetIp())
 	response := app.ResultModel{}
 	if err != nil {
 		glog.Warningf("Bad request: %s", err)
@@ -98,13 +105,18 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 		http.Error(w, utils.ToJson(response), http.StatusBadRequest)
 		return
 	}
+	glog.V(2).Infof("Request data: %v", utils.ToJson(c.Data))
 	client := utils.AuthDetails{
-		ClientId:     c.Data.GetString("client_id"),
-		Scope:        c.Data.GetString("scope"),
-		ResponseType: c.Data.GetString("response_type"),
+		ClientId:     c.GetUrlParam("client_id"),
+		ClientSecret: c.Data.GetString("client_secret"),
+		Scope:        c.GetUrlParam("scope"),
+		GrantType:    c.GetUrlParam("grant_type"),
+		ResponseType: c.GetUrlParam("response_type"),
+		RedirectUrl:  c.GetUrlParam("redirect_uri"),
+		State:        c.GetUrlParam("state"),
 		Validation:   true,
-		Username:     c.Data.GetString("username"),
-		Password:     c.Data.GetString("password"),
+		Username:     ar.User,
+		Password:     string(ar.Password),
 	}
 	errorList, ok := client.Validate()
 	if !ok {
@@ -132,7 +144,17 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 	}
 	// Generate authorization code
 	if ok {
-		GenerateToken(w, ar, c.Data, client.ResponseType)
+		code, redirect := GenerateToken(w, ar, client)
+		if redirect {
+			u, err := url.ParseRequestURI(client.RedirectUrl)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			} else {
+				glog.V(2).Infof("Code: %s", code.GetString(utils.AuthorizationCodeField))
+				u.Query().Add(utils.AuthorizationCodeField, code.GetString(utils.AuthorizationCodeField))
+				http.Redirect(w, r, u.String(), http.StatusTemporaryRedirect)
+			}
+		}
 	} else {
 		response.ResponseMessage = fmt.Sprintf("Invalid username or password: %s", err)
 		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
@@ -140,9 +162,10 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 	}
 }
 
-func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, dt utils.StringMap, requestType string) {
+func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.AuthDetails) (code utils.StringMap, ok bool) {
 	//Authenticated
 	var err error
+	ok = false
 	ares := make([]utils.AuthzResult, 0)
 	if len(ar.Scopes) > 0 {
 		ares, err = Auth.Authorize(ar)
@@ -151,8 +174,63 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, dt utils.String
 			return
 		}
 	}
+	response := app.ResultModel{}
+	// Grant token accordingly
+	switch client.GrantType {
+	case app.ClientCredentialsGrant:
+		if strings.Compare(client.ResponseType, app.AuthorizationCodeGrantType) != 0 {
+			response.ResponseMessage = fmt.Sprintf("invalid grant type: %s", client.ResponseType)
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			app.WriteResult(w, response)
+			return
+		}
+		// Generate token
+		token, err := Auth.GrantClientCredentials(client, ar, ares)
+		if err != nil {
+			response.ResponseMessage = err.Error()
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			app.WriteResult(w, response)
+		} else {
+			app.WriteResult(w, token)
+		}
+		break
+	case app.ImplicitGrant:
+		if strings.Compare(app.AccessTokenRequestType, client.ResponseType) != 0 {
+			response.ResponseMessage = fmt.Sprintf("Invalid response type %s", client.ResponseType)
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			app.WriteResult(w, response)
+		} else {
+			// No redirection required
+			_, _ = GenerateAuthToken(w, ar, ares, client)
+		}
+		break
+	case app.AuthorizationCodeGrantType:
+		// Authorization and redirection enabled
+		return GenerateAuthToken(w, ar, ares, client)
+	case app.PasswordGrant:
+		// Password grant
+		if strings.Compare(app.AccessTokenRequestType, client.ResponseType) != 0 {
+			response.ResponseMessage = fmt.Sprintf("Invalid response type %s", client.ResponseType)
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			app.WriteResult(w, response)
+		} else {
+			// Generate client auth token
+			client.ResponseType = app.PasswordRequestType
+			_, _ = GenerateAuthToken(w, ar, ares, client)
+		}
+		break
+	default:
+		response.ResponseMessage = fmt.Sprintf("Invalid grant type %s", client.GrantType)
+		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+		app.WriteResult(w, response)
+	}
+	return
+}
+func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []utils.AuthzResult, client utils.AuthDetails) (code utils.StringMap, ok bool) {
 	// Generate grant code or token
-	if requestType == "token" {
+	var err error
+	switch client.ResponseType {
+	case app.AccessTokenRequestType:
 		token, err := Auth.CreateOAuthToken(ar, ares)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to generate token %s", err)
@@ -160,22 +238,30 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, dt utils.String
 			glog.Errorf("%s: %s", ar, msg)
 			return
 		}
-		for k, v := range token {
-			dt.Add(k, v)
-		}
-	} else if requestType == "code" {
-		code, err := OAuth2.CreateAuthorizationCode(ar, ares)
+		app.WriteResult(w, token)
+		break
+	case app.AuthorizationCodeRequestType:
+		code, err = OAuth2.CreateAuthorizationCode(ar, ares)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to generate token %s", err)
 			http.Error(w, msg, http.StatusInternalServerError)
 			glog.Errorf("%s: %s", ar, msg)
-			return
+		} else {
+			ok = true
 		}
-		dt = code
-	} else {
-		http.Error(w, fmt.Sprintf("Invalid request type: %v", requestType), http.StatusBadRequest)
-		return
+		break
+	case app.PasswordRequestType:
+		code, err = OAuth2.PasswordGrantToken(ar, ares, client)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to generate token %s", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			glog.Errorf("%s: %s", ar, msg)
+		} else {
+			app.WriteResult(w, code)
+		}
+		break
+	default:
+		http.Error(w, fmt.Sprintf("Invalid request type: %v", client.ResponseType), http.StatusBadRequest)
 	}
-	app.WriteResult(w, dt)
-
+	return
 }

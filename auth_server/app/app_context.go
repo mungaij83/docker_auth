@@ -7,17 +7,23 @@ import (
 )
 
 type Context struct {
-	IpAddress    string            `json:"ip_address"`
-	Data         utils.StringMap   `json:"data"`
-	Method       string            `json:"method"`
-	PathParams   map[string]string `json:"path_params"`
-	HeaderParams url.Values        `json:"header_params"`
+	IpAddress     string            `json:"ip_address"`
+	Data          utils.StringMap   `json:"data"`
+	FormData      url.Values        `json:"form_data"`
+	Method        string            `json:"method"`
+	MediaType     string            `json:"media_type"`
+	PathParams    map[string]string `json:"path_params"`
+	HeaderParams  url.Values        `json:"header_params"`
+	HaveBasicAuth bool
 }
 
 func NewContext(ip string) *Context {
 	return &Context{IpAddress: ip}
 }
 
+func (c Context) IsMultipart() bool {
+	return c.MediaType == "multipart/form-data"
+}
 func (c Context) GetPathParam(name string) string {
 	val, ok := c.PathParams[name]
 	if ok {

@@ -5,7 +5,9 @@ type StringMap map[string]interface{}
 func (sm StringMap) GetString(key string) string {
 	val, ok := sm[key]
 	if ok {
-		return val.(string)
+		if vl, ok := val.(string); ok {
+			return vl
+		}
 	}
 	return ""
 }

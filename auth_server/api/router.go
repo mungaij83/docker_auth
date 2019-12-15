@@ -18,11 +18,12 @@ func NewApiRouter(c *utils.Config) error {
 		return err
 	}
 	// Initialize Oauth 2
-	OAuth2, err = app.NewOauth2(c,Auth)
+	OAuth2, err = app.NewOauth2(c, Auth)
 	if err != nil {
 		return err
 	}
 	InitAuth()
 	InitAuth2()
+	InitOpenId()
 	return nil
 }

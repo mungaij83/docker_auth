@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/utils"
+	"strings"
 	"time"
 
 	"github.com/cesanta/glog"
@@ -103,10 +104,13 @@ func (db *TokenDBImpl) GetValue(user string) (*TokenDBValue, error) {
 }
 
 func (db *TokenDBImpl) GetData(key string, prefix string) (utils.StringMap, error) {
+	if len(strings.TrimSpace(key)) <= 5 {
+		return nil, fmt.Errorf("authorization code is required[%v]",key)
+	}
 	valueStr, err := db.Get(getDBKey(key, prefix), nil)
 	switch {
 	case err == leveldb.ErrNotFound:
-		return nil, nil
+		return nil, errors.New("invalid authorization code")
 	case err != nil:
 		glog.Errorf("error accessing token db: %s", err)
 		return nil, fmt.Errorf("error accessing token db: %s", err)

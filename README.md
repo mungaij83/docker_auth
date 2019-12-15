@@ -18,11 +18,17 @@ Supported authentication methods:
  * MongoDB user collection
  * [External program](https://github.com/cesanta/docker_auth/blob/master/examples/ext_auth.sh)
 
-Supported authorization methods:
- * Static ACL
- * MongoDB-backed ACL
- * External program
-
+## Supported authorization methods:
+1. Static ACL
+2. Basic Auth
+3. OAuth 2 authorization methods (RFC 6749)
+	+ Implicit grant
+	+ Password grant
+	+ Client credentials grant
+	+ Authorization code grant
+ 4. MongoDB-backed ACL
+ 5. External program
+ 6. OpenId connect 
 ## Installation and Examples
 
 A public Docker image is available on Docker Hub: [cesanta/docker_auth](https://registry.hub.docker.com/u/cesanta/docker_auth/).
@@ -59,6 +65,13 @@ docker run ... cesanta/docker_auth:1 --v=2 --alsologtostderr /config/auth_config
 Bug reports, feature requests and pull requests (for small fixes) are welcome.
 If you require larger changes, please file an issue.
 We cannot guarantee response but will do our best to address them.
+
+# Certificate Generation
+
+Use the following command to generate self signed certificates (test).
+```{r, engine='bash', count_lines}
+$openssl req -newkey rsa:2048 -nodes -keyout server.pem -x509 -days 365 -out certificate.pem
+```
 
 ## Licensing
 

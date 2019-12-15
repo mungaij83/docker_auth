@@ -5,4 +5,6 @@ const (
 	AccessTokenField       = "access_token"
 	RefreshTokenField      = "refresh_token"
 	AlgorithmField         = "algorithm"
+	PayloadField           = "payload"
+	JwtSubField            = "sub"
 )

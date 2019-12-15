@@ -21,6 +21,9 @@ type AuthDetails struct {
 	ClientId          string
 	ClientSecret      string
 	Scope             string
+	State             string
+	GrantType         string
+	RedirectUrl       string
 	AuthorizationCode string
 	ResponseType      string
 	RemoteAddress     string

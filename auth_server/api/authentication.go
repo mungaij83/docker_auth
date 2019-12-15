@@ -36,7 +36,7 @@ func GoogleAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request
 }
 
 func HandleAuth(c *app.Context, rw http.ResponseWriter, r *http.Request) {
-	ar, err := Auth.ParseRequest(r, c.GetIp())
+	ar, err := Auth.ParseRequest(c, c.GetIp())
 	ares := make([]utils.AuthzResult, 0)
 	if err != nil {
 		glog.Warningf("Bad request: %s", err)

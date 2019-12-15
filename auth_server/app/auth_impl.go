@@ -9,7 +9,6 @@ import (
 	"github.com/cesanta/glog"
 	"math/rand"
 	"net"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -124,10 +123,10 @@ func (as *AuthService) Authenticate(ar *utils.AuthRequest) (bool, utils.Labels, 
 	return false, nil, nil
 }
 
-func (as *AuthService) ParseRequest(req *http.Request, ipAddr net.IP) (*utils.AuthRequest, error) {
-	ar := &utils.AuthRequest{RemoteConnAddr: req.RemoteAddr, RemoteAddr: req.RemoteAddr}
+func (as *AuthService) ParseRequest(req *Context, ipAddr net.IP) (*utils.AuthRequest, error) {
+	ar := &utils.AuthRequest{RemoteConnAddr: req.IpAddress, RemoteAddr: req.IpAddress}
 	if as.config.Server.RealIPHeader != "" {
-		hv := req.Header.Get(as.config.Server.RealIPHeader)
+		hv := req.HeaderParams.Get(as.config.Server.RealIPHeader)
 		ips := strings.Split(hv, ",")
 
 		realIPPos := as.config.Server.RealIPPos
@@ -148,32 +147,33 @@ func (as *AuthService) ParseRequest(req *http.Request, ipAddr net.IP) (*utils.Au
 	if ar.RemoteIP == nil {
 		return nil, fmt.Errorf("unable to parse remote addr %s", ar.RemoteAddr)
 	}
-	user, password, haveBasicAuth := req.BasicAuth()
-	if haveBasicAuth {
-		ar.User = user
-		ar.Password = utils.PasswordString(password)
-	} else if req.Method == "POST" {
+	// Authorization data
+	scope := ""
+	if req.HaveBasicAuth {
+		scope = req.GetUrlParam("scope")
+		ar.User = req.Data.GetString("username")
+		ar.Account = ar.User
+		ar.Password = utils.PasswordString(req.Data.GetString("password"))
+	} else if req.IsMultipart() {
+		scope = req.FormData.Get("scope")
+		ar.Service = req.FormData.Get("service")
+		ar.Account = req.FormData.Get("account")
+		ar.User = req.FormData.Get("account")
+	} else {
+		scope = req.Data.GetString("scope")
+		ar.Service = req.Data.GetString("service")
 		// username and password could be part of form data
-		username := req.FormValue("username")
-		password := req.FormValue("password")
+		username := req.Data.GetString("username")
+		password := req.Data.GetString("password")
 		if username != "" && password != "" {
 			ar.User = username
+			ar.Account = username
 			ar.Password = utils.PasswordString(password)
 		}
 	}
-	ar.Account = req.FormValue("account")
-	if ar.Account == "" {
-		ar.Account = ar.User
-	} else if haveBasicAuth && ar.Account != ar.User {
-		return nil, fmt.Errorf("user and account are not the same (%q vs %q)", ar.User, ar.Account)
-	}
-	ar.Service = req.FormValue("service")
-	if err := req.ParseForm(); err != nil {
-		return nil, fmt.Errorf("invalid form value")
-	}
-	// https://github.com/docker/distribution/blob/1b9ab303a477ded9bdd3fc97e9119fa8f9e58fca/docs/spec/auth/scope.md#resource-scope-grammar
-	if req.FormValue("scope") != "" {
-		for _, scopeStr := range req.Form["scope"] {
+	// Parse scope in request
+	if scope != "" {
+		for _, scopeStr := range req.FormData["scope"] {
 			parts := strings.Split(scopeStr, ":")
 			var scope utils.AuthScope
 			switch len(parts) {
@@ -307,16 +307,14 @@ func (as *AuthService) CreateAuthorizationToken(ar *utils.AuthRequest, ares []ut
 		return nil, err
 	}
 	tokenResult := utils.StringMap{}
-	if err != nil {
-		return tokenResult, err
-	}
 
 	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
 	if err != nil || sigAlg2 != sigAlg {
 		return tokenResult, fmt.Errorf("failed to sign token: %s", err)
 	}
-	tokenResult.Add("sub", ar.Account)
-	tokenResult.Add("algorithm", sigAlg)
+
+	tokenResult.Add(utils.JwtSubField, ar.Account)
+	tokenResult.Add(utils.AlgorithmField, sigAlg)
 	tokenResult.Add("service", ar.Service)
 	tokenResult.Add(utils.AuthorizationCodeField, utils.JsonBase64UrlEncode(sig))
 	return tokenResult, nil
@@ -389,23 +387,34 @@ func (as *AuthService) ValidateJWT(tokenStr, signAlg string, isAlt bool) (utils.
 func (as *AuthService) GenerateJWT(payload string, sigAlg string) (utils.StringMap, error) {
 	tokenResult := utils.StringMap{}
 	var err error
-	if err != nil {
+	tc := &as.config.Token
+	// Public key configured
+	if tc.GetPublicKey() == nil {
+		err = errors.New("public key not configured")
 		return tokenResult, err
 	}
-	tc := &as.config.Token
-	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
-	if err != nil || sigAlg2 != sigAlg {
-		return tokenResult, fmt.Errorf("failed to sign token: %s", err)
+	// Private key check
+	if tc.GetPrivateKey() == nil {
+		err = errors.New("private key not configured")
+		return tokenResult, err
+	}
+	// Token check
+	sig, _, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
+	if err != nil {
+		return tokenResult, fmt.Errorf("failed to sign token: %s", err.Error())
 	}
 	if tc.GetAltPrivateKey() != nil {
 		sigRefresh, _, err2 := tc.GetAltPrivateKey().Sign(strings.NewReader(payload), 0)
 		if err2 != nil {
-			return tokenResult, fmt.Errorf("failed to sign token: %s", err)
+			return tokenResult, fmt.Errorf("failed to sign token: %s", err2.Error())
 		}
 		// Add access token and refresh token
 		tokenResult.Add("refresh_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sigRefresh)))
 	}
 	tokenResult.Add("access_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sig)))
+	glog.Infof("Token: %s", utils.ToJson(tokenResult))
+	tokenResult.Add("expires_in", tc.Expiration)
+	tokenResult.Add("token_type", "Bearer")
 	return tokenResult, nil
 }
 
@@ -433,4 +442,24 @@ func (as *AuthService) Stop() {
 		az.Stop()
 	}
 	glog.Infof("Server stopped")
+}
+
+// Client credentials grant type
+func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, request *utils.AuthRequest, results []utils.AuthzResult) (utils.StringMap, error) {
+	c, ok := as.config.Oauth2.Clients[client.ClientId]
+	if !ok {
+		glog.Infof("Invalid client id: %v", client.ClientId)
+		return nil, errors.New("invalid client id or secret")
+	}
+	if strings.Compare(c.ClientSecret, client.ClientSecret) != 0 {
+		glog.Infof("invalid client secret")
+		return nil, errors.New("invalid client id or secret")
+	}
+	request.User = client.ClientId
+	payload, sigAlg, err := as.GetClaims(request, results)
+	if err != nil {
+		return nil, err
+	}
+	glog.Infof("Grant client credentials")
+	return as.GenerateJWT(payload, sigAlg)
 }
