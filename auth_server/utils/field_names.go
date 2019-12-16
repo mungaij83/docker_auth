@@ -7,4 +7,10 @@ const (
 	AlgorithmField         = "algorithm"
 	PayloadField           = "payload"
 	JwtSubField            = "sub"
+	JwtExpireInField       = "expires_in"
+	JwtTokenType           = "token_type"
+)
+
+const (
+	BearerTokenType = "Bearer"
 )

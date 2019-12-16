@@ -7,6 +7,7 @@ import (
 )
 
 type Context struct {
+	ActionName    string            `json:"action_name"`
 	IpAddress     string            `json:"ip_address"`
 	Data          utils.StringMap   `json:"data"`
 	FormData      url.Values        `json:"form_data"`

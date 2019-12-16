@@ -241,19 +241,23 @@ func (as *AuthService) Authorize(ar *utils.AuthRequest) ([]utils.AuthzResult, er
 }
 
 // https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
-func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (string, error) {
+func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
 	payload, sigAlg, err := as.GetClaims(ar, ares)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	tc := &as.config.Token
 
 	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
 	if err != nil || sigAlg2 != sigAlg {
-		return "", fmt.Errorf("failed to sign token: %s", err)
+		return nil, fmt.Errorf("failed to sign token: %s", err)
 	}
+	result := utils.StringMap{}
 	glog.Infof("New token for %s %+v", *ar, ar.Labels)
-	return fmt.Sprintf("%s%s%s", payload, TokenSeparator, utils.JsonBase64UrlEncode(sig)), nil
+	result.Add(utils.AccessTokenField, fmt.Sprintf("%s%s%s", payload, TokenSeparator, utils.JsonBase64UrlEncode(sig)))
+	result.Add(utils.JwtExpireInField, tc.Expiration)
+	result.Add(utils.JwtTokenType, utils.BearerTokenType)
+	return result, nil
 }
 
 func (as *AuthService) GetClaims(ar *utils.AuthRequest, ares []utils.AuthzResult) (string, string, error) {
@@ -411,10 +415,10 @@ func (as *AuthService) GenerateJWT(payload string, sigAlg string) (utils.StringM
 		// Add access token and refresh token
 		tokenResult.Add("refresh_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sigRefresh)))
 	}
-	tokenResult.Add("access_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sig)))
+	tokenResult.Add(utils.AccessTokenField, fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sig)))
 	glog.Infof("Token: %s", utils.ToJson(tokenResult))
-	tokenResult.Add("expires_in", tc.Expiration)
-	tokenResult.Add("token_type", "Bearer")
+	tokenResult.Add(utils.JwtExpireInField, tc.Expiration)
+	tokenResult.Add(utils.JwtTokenType, "Bearer")
 	return tokenResult, nil
 }
 

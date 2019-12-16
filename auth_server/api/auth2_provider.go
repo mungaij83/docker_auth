@@ -12,13 +12,35 @@ import (
 )
 
 func InitAuth2() {
+	// Login page
 	Srv.Handle("/login", app.ApiHandler(HandleLoginRequest))
-	Srv.Handle("/auth/credentials/{realm:[A-Za-z0-9_]+}", app.ApiHandler(HandleClientCredentials))
-	Srv.Handle("/auth/token/{realm:[A-Za-z0-9_]+}", app.ApiHandler(HandleToken))
-	Srv.Handle("/validate/token/{realm:[A-Za-z0-9_]+}", app.ApiHandler(ValidateAccessToken))
+	// Authorization endpoint
+	Srv.Handle("/api/authorization/{realm:[A-Za-z0-9_]+}", app.ApiHandler(HandleClientCredentials))
+	// Password Grant
+	Srv.Handle("/api/authorization-p/{realm:[A-Za-z0-9_]+}", app.ApiHandler(PasswordAuth))
+	// Client credentials
+	Srv.Handle("/api/client/credentials/{realm:[A-Za-z0-9_]+}", app.ApiHandler(ClientCredentialsAuth))
+	// Token endpoint
+	Srv.Handle("/api/token/{realm:[A-Za-z0-9_]+}", app.ApiHandler(HandleToken))
+	// Validate OauthToken
+	Srv.Handle("/api/validate/token/{realm:[A-Za-z0-9_]+}", app.ApiHandler(ValidateAccessToken))
 }
 
-func ValidateAccessToken(c *app.Context, w http.ResponseWriter, r *http.Request) {
+// Client credentials grant type
+func ClientCredentialsAuth(c *app.Context, w http.ResponseWriter, r *http.Request) {
+	c.ActionName = "ClientCredentialsAuth"
+	AuthorizationClient(c, w, r, app.ClientCredentialsGrant)
+}
+
+// Password grant type
+func PasswordAuth(c *app.Context, w http.ResponseWriter, r *http.Request) {
+	c.ActionName = "PasswordAuth"
+	AuthorizationClient(c, w, r, app.PasswordGrant)
+}
+
+// Validate access token
+func ValidateAccessToken(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "ValidateAccessToken"
 	details := utils.TokenDetails{
 		AccessToken:  c.Data.GetString("access_token"),
 		RequestType:  "validate",
@@ -35,7 +57,8 @@ func ValidateAccessToken(c *app.Context, w http.ResponseWriter, r *http.Request)
 }
 
 // Validate response_code and generate access_code
-func HandleToken(c *app.Context, w http.ResponseWriter, r *http.Request) {
+func HandleToken(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "HandleToken"
 	client := utils.AuthDetails{
 		ClientId:          c.Data.GetString("client_id"),
 		ClientSecret:      c.Data.GetString("client_secret"),
@@ -44,14 +67,22 @@ func HandleToken(c *app.Context, w http.ResponseWriter, r *http.Request) {
 		AuthorizationCode: c.Data.GetString("authorization_code"),
 		Validation:        true,
 	}
+	// Only allow response_type="token"
+	response := app.ResultModel{}
+	if strings.Compare(client.ResponseType, app.AccessTokenRequestType) != 0 {
+		response.ResponseMessage = "Invalid response type"
+		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+		app.WriteResult(w, response)
+		return
+	}
+	// Make sure other details are set
 	errorList, ok := client.Validate()
 	if ok {
-
 		// Generate OAuth 2 token
 		token, err := OAuth2.ValidateResponseCode(client)
 		if err != nil {
 			glog.Infof("Access token error: %v", err)
-			response := app.ResultModel{}
+
 			response.ResponseMessage = err.Error()
 			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
 			app.WriteResult(w, response)
@@ -65,14 +96,15 @@ func HandleToken(c *app.Context, w http.ResponseWriter, r *http.Request) {
 }
 
 // Serve login page or validation failed page
-func HandleLoginRequest(c *app.Context, w http.ResponseWriter, r *http.Request) {
-
+func HandleLoginRequest(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "HandleLoginRequest"
 	client := utils.AuthDetails{
 		ClientId:     c.GetUrlParam("client_id"),
 		Scope:        c.GetUrlParam("scope"),
 		ResponseType: c.GetUrlParam("response_type"),
 		Validation:   true,
 	}
+	// Validate client
 	errorList, ok := client.Validate()
 	if ok {
 		errorList = utils.StringMap{}
@@ -82,7 +114,7 @@ func HandleLoginRequest(c *app.Context, w http.ResponseWriter, r *http.Request) 
 			app.WriteTemplate(w, errorList, "templates/login_check_failed.html")
 			return
 		}
-
+		// Serve template
 		if ok {
 			app.WriteTemplate(w, nil, "templates/login.html")
 		} else {
@@ -96,13 +128,32 @@ func HandleLoginRequest(c *app.Context, w http.ResponseWriter, r *http.Request) 
 
 // Authorize client and generate authorization code
 func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Request) {
+	c.ActionName = "HandleClientCredentials"
+	grantType := c.GetUrlParam("grant_type")
+	switch grantType {
+	case app.ImplicitGrant, app.AuthorizationCodeGrantType:
+		glog.Infof("Handler: %s", grantType)
+		// Authorization grant
+		AuthorizationClient(c, w, r, grantType)
+		break
+	default:
+		response := app.ResultModel{}
+		response.ResponseMessage = fmt.Sprintf("Invalid authorization grant type: %s", grantType)
+		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+		w.WriteHeader(http.StatusBadRequest)
+		app.WriteResult(w, response)
+		return
+	}
+}
+
+func AuthorizationClient(c *app.Context, w http.ResponseWriter, r *http.Request, expectedType string) {
 	ar, err := Auth.ParseRequest(c, c.GetIp())
 	response := app.ResultModel{}
 	if err != nil {
 		glog.Warningf("Bad request: %s", err)
 		response.ResponseMessage = fmt.Sprintf("Bad request: %s", err)
 		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
-		http.Error(w, utils.ToJson(response), http.StatusBadRequest)
+		app.WriteResult(w, response)
 		return
 	}
 	glog.V(2).Infof("Request data: %v", utils.ToJson(c.Data))
@@ -120,7 +171,7 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 	}
 	errorList, ok := client.Validate()
 	if !ok {
-		glog.Warningf("Bad login: %v", err)
+		glog.V(2).Infof("Bad login data: %v", err)
 		response.Data = errorList
 		response.ResponseMessage = fmt.Sprintf("Bad request: %v", err)
 		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
@@ -128,22 +179,49 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 		app.WriteResult(w, response)
 		return
 	}
-	// Get post login details
-	if len(c.Data) > 0 {
-		ar.Account = client.Username
-		ar.Password = utils.PasswordString(client.Password)
-	}
-	ar.Service, _ = c.PathParams["realm"]
-	_, err = OAuth2.ValidateAccount(ar.Account, ar.Password)
-	if err != nil {
-		glog.Warningf("Bad request: %s", err)
-		response.ResponseMessage = fmt.Sprintf("Bad request: %s", err)
+	glog.V(2).Infof("Check grant type")
+	// Only implicit and authorization grant types are allowed on this endpoint
+	if strings.Compare(client.GrantType, expectedType) != 0 {
+		glog.V(2).Infof("Invalid grant type")
+		response.ResponseMessage = fmt.Sprintf("Invalid request to authorization endpoint: %s", client.GrantType)
 		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
-		http.Error(w, utils.ToJson(response), http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		app.WriteResult(w, response)
 		return
 	}
+	glog.V(2).Infof("Processing request: %s", expectedType)
+	// Authenticate user
+	ar.Service, _ = c.PathParams["realm"]
 	// Generate authorization code
-	if ok {
+	okCode := false
+	switch expectedType {
+	case app.PasswordGrant, app.ClientCredentialsGrant:
+		glog.V(2).Infof("Authorization code(type): %s", expectedType)
+		okCode = true
+		break
+	case app.AuthorizationCodeGrantType, app.ImplicitGrant:
+		_, err = OAuth2.ValidateAccount(ar.Account, ar.Password)
+		if err != nil {
+			glog.V(2).Infof("Bad request: %s", err)
+			response.ResponseMessage = fmt.Sprintf("Invalid username of password: %s", err)
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			w.WriteHeader(http.StatusBadRequest)
+			app.WriteResult(w, response)
+		} else {
+			glog.V(2).Infof("Authorization success")
+			okCode = true
+		}
+		break
+	default:
+		response.ResponseMessage = fmt.Sprintf("invalid request: %s", expectedType)
+		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+		app.WriteResult(w, response)
+		return
+	}
+	glog.V(2).Infof("Nex request [%v]", okCode)
+	// Generate code
+	if okCode {
+		glog.V(1).Infof("Generating token: %s", expectedType)
 		code, redirect := GenerateToken(w, ar, client)
 		if redirect {
 			u, err := url.ParseRequestURI(client.RedirectUrl)
@@ -152,14 +230,11 @@ func HandleClientCredentials(c *app.Context, w http.ResponseWriter, r *http.Requ
 			} else {
 				glog.V(2).Infof("Code: %s", code.GetString(utils.AuthorizationCodeField))
 				u.Query().Add(utils.AuthorizationCodeField, code.GetString(utils.AuthorizationCodeField))
-				http.Redirect(w, r, u.String(), http.StatusTemporaryRedirect)
+				http.Redirect(w, r, u.String(), http.StatusFound)
 			}
 		}
-	} else {
-		response.ResponseMessage = fmt.Sprintf("Invalid username or password: %s", err)
-		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
-		http.Error(w, utils.ToJson(response), http.StatusBadRequest)
 	}
+
 }
 
 func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.AuthDetails) (code utils.StringMap, ok bool) {
