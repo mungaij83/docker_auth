@@ -1,62 +1,71 @@
-MAKEFLAGS += --warn-undefined-variables
-IMAGE ?= cesanta/docker_auth
-COMPRESS_BINARY ?= false
-CA_BUNDLE = /etc/ssl/certs/ca-certificates.crt
-VERSION = $(shell cat version.txt)
+.PHONY:run run-server build-linux build package stop stop-server docker-push generate-code
+MAJOR_VERSION=1
+MINOR_VERSION=0
+UPDATE_VERSION=1
+DIST_ROOT=dist
+BUILD_NAME=auth_server
 
-BUILDER_IMAGE ?= golang:1.13-alpine
+VERSION_TAG=$(MAJOR_VERSION).$(MINOR_VERSION).$(UPDATE_VERSION)
+DIST_PATH=$(DIST_ROOT)/auth_server
+# Docker specific
+DOCKER_NAME=auth_server
+BUILD_TAG_LATEST=latest
+BUILD_TAG=release-$(VERSION_TAG)
+DOCKER_IMAGE=sqilab/$(DOCKER_NAME)
+# Go params
+GO=go
+BUILDER_GOOS_GOARCH="$(shell $(GO) env GOOS)_$(shell $(GO) env GOARCH)"
 
-.PHONY: %
+GOFLAGS ?= $(GOFLAGS:) -a -installsuffix cgo
+ENV_FLAGS=ENV_TYPE='dev'
 
-all: build
+run-server:
+	@echo Running web server for development
+	#mkdir -p $(BUILD_WEBAPP_DIR)/dist/files
+	$(ENV_FLAGS) $(GO) run $(GOFLAGS) ./main.go &
+generate-code:
+	go generate github.com/cesanta/docker_auth/auth_server
+run:run-server
+build: build-linux
+build-linux:generate-code
+	@echo Generate code
+	@echo Check code
+	env GO111MODULE=on go vet
+	@echo Build Linux amd64
+	env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GO111MODULE=on $(GO) build $(GOFLAGS) -o $(BUILD_NAME) main.go version.go
 
-deps:
-	go get -v github.com/a-urth/go-bindata/go-bindata
+	@echo Delete version file
+	rm version.go
 
-generate:
-	go generate \
-	  github.com/cesanta/docker_auth/auth_server \
-	  github.com/cesanta/docker_auth/auth_server/authn/... \
-	  github.com/cesanta/docker_auth/auth_server/authz/... \
-	  github.com/cesanta/docker_auth/auth_server/mgo_session/... \
-	  github.com/cesanta/docker_auth/auth_server/server/...
+build-image:
+	@echo Building docker image
+	build-linux
+	cd $(DIST_PATH); @docker build -t $(DOCKER_IMAGE):$(BUILD_TAG) .; docker tag $(DOCKER_IMAGE):$(BUILD_TAG_LATEST)
 
-build:
-	CGO_ENABLED=0 go build -v --ldflags=--s
+package: build
+	@ echo Packaging system
 
-ca-certificates.crt:
-	cp $(CA_BUNDLE) .
+	rm -Rf $(DIST_ROOT)
 
-build-release: ca-certificates.crt
-	docker run --rm -v $(PWD)/..:/src \
-	  $(BUILDER_IMAGE) sh -x -c "\
-	    apk update && apk add git make py2-pip && pip install GitPython && \
-	    cd /src/auth_server && \
-	    umask 0 && \
-	    go install -v github.com/a-urth/go-bindata/go-bindata && \
-	    make generate && \
-	    CGO_ENABLED=0 go build -v --ldflags=--s"
-	@echo === Built version $$(cat version.txt) ===
+	mkdir -p $(DIST_PATH)/bin
 
-auth_server:
-	@echo
-	@echo Use build or build-release to produce the auth_server binary
-	@echo
-	@exit 1
+	@ echo Copy templates files
+	cp -RL templates $(DIST_PATH)
 
-docker-build:
-	docker build -t $(IMAGE):latest .
-	docker tag $(IMAGE):latest $(IMAGE):$(VERSION)
+	@ echo Copy GO build file to bin
+	mv $(BUILD_NAME) $(DIST_PATH)/bin
 
-docker-tag-%:
-	docker tag $(IMAGE):latest $(IMAGE):$*
+	@echo Build docker
+	cp Dockerfile $(DIST_PATH)
+	cd $(DIST_PATH); docker build -t $(DOCKER_IMAGE):$(BUILD_TAG) .; docker tag $(DOCKER_IMAGE):$(BUILD_TAG) $(DOCKER_IMAGE):$(BUILD_TAG_LATEST)
 
-docker-push:
-	docker push $(IMAGE):latest
-	docker push $(IMAGE):$(VERSION)
-
-docker-push-%: docker-tag-%
-	docker push $(IMAGE):$*
-
-clean:
-	rm -rf auth_server vendor/*/*
+stop-server:
+	@for PID in $$(ps -ef | grep "[g]o run" | awk '{ print $$2 }'); do \
+		echo stopping go $$PID; \
+		kill $$PID; \
+		done
+	@for PID in $$(ps -ef | grep "[g]o-build" | awk '{ print $$2 }'); do \
+		echo stopping $$PID; \
+		kill $$PID; \
+	done
+stop: stop-server

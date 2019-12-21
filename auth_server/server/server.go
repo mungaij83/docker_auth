@@ -19,6 +19,7 @@ package server
 import (
 	"github.com/cesanta/docker_auth/auth_server/api"
 	"github.com/cesanta/docker_auth/auth_server/utils"
+	"github.com/cesanta/glog"
 	"github.com/gorilla/mux"
 )
 
@@ -29,6 +30,7 @@ type AuthServer struct {
 
 // Initialize auth server
 func NewAuthServer(c *utils.Config) (*AuthServer, error) {
+	glog.Infof("Server config: %s", utils.ToJson(c))
 	err := api.NewApiRouter(c)
 	if err != nil {
 		return nil, err

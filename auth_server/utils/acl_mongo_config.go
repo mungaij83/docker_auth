@@ -2,15 +2,17 @@ package utils
 
 import (
 	"fmt"
-	"gopkg.in/mgo.v2"
+	"github.com/globalsign/mgo"
 	"time"
 )
 
 // Config stores how to connect to the MongoDB server and an optional password file
 type MongoConfig struct {
-	DialInfo     mgo.DialInfo `yaml:",inline"`
-	PasswordFile string       `yaml:"password_file,omitempty"`
-	EnableTLS    bool         `yaml:"enable_tls,omitempty"`
+	DialInfo         mgo.DialInfo `yaml:",inline"`
+	DatabaseName     string       `yaml:"database_name,omitempty"`
+	MongoPassword    string       `yaml:"mongo_password,omitempty"`
+	ConnectionString string       `yaml:"connection_string,omitempty"`
+	EnableTLS        bool         `yaml:"enable_tls,omitempty"`
 }
 
 // Validate ensures the most common fields inside the mgo.DialInfo portion of
@@ -18,7 +20,7 @@ type MongoConfig struct {
 // Config itself.
 func (c *MongoConfig) Validate(configKey string) error {
 	if len(c.DialInfo.Addrs) == 0 {
-		return fmt.Errorf("At least one element in %s.dial_info.addrs is required", configKey)
+		return fmt.Errorf("at least one element in %s.dial_info.addrs is required", configKey)
 	}
 	if c.DialInfo.Timeout == 0 {
 		c.DialInfo.Timeout = 10 * time.Second
@@ -30,9 +32,9 @@ func (c *MongoConfig) Validate(configKey string) error {
 }
 
 type ACLMongoConfig struct {
-	MongoConfig *MongoConfig `yaml:"dial_info,omitempty"`
-	Collection  string              `yaml:"collection,omitempty"`
-	CacheTTL    time.Duration       `yaml:"cache_ttl,omitempty"`
+	MongoConfig *MongoConfig  `yaml:"dial_info,omitempty"`
+	Collection  string        `yaml:"collection,omitempty"`
+	CacheTTL    time.Duration `yaml:"cache_ttl,omitempty"`
 }
 
 // Validate ensures that any custom config options

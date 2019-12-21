@@ -48,16 +48,16 @@ $ docker run \
     --rm -it --name docker_auth -p 5001:5001 \
     -v /path/to/config_dir:/config:ro \
     -v /var/log/docker_auth:/logs \
-    cesanta/docker_auth:1 /config/auth_config.yml
+    sqilab/auth_server:1 /config/auth_config.yml
 ```
 
-See the [example config files](https://github.com/cesanta/docker_auth/tree/master/examples/) to get an idea of what is possible.
+See the [example config files](https://github.com/mungaij83/docker_auth/tree/master/examples/) to get an idea of what is possible.
 
 ## Troubleshooting
 
 Run with increased verbosity:
 ```{r, engine='bash', count_lines}
-docker run ... cesanta/docker_auth:1 --v=2 --alsologtostderr /config/auth_config.yml
+docker run ... sqilab/auth_server:1 --v=2 --alsologtostderr /config/auth_config.yml
 ```
 
 ## Contributing

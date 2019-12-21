@@ -12,6 +12,16 @@ func (sm StringMap) GetString(key string) string {
 	return ""
 }
 
+func (sm StringMap) GetBool(key string) bool {
+	val, ok := sm[key]
+	if ok {
+		if vl, ok := val.(bool); ok {
+			return vl
+		}
+	}
+	return false
+}
+
 func (sm StringMap) Add(key string, value interface{}) {
 	if len(key) > 0 {
 		sm[key] = value

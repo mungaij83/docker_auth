@@ -141,6 +141,7 @@ func ServeOnce(c *utils.Config, cf string, hd *httpdown.HTTP) (*server.AuthServe
 }
 
 func (rs *RestartableServer) Serve(c *utils.Config) {
+	glog.Infof("Serve(1) config: %s", utils.ToJson(c))
 	rs.authServer, rs.hs = ServeOnce(c, rs.configFile, rs.hd)
 	rs.WatchConfig()
 }
@@ -219,9 +220,11 @@ func main() {
 	if err != nil {
 		glog.Exitf("Failed to load config: %s", err)
 	}
+	glog.Infof("Serve(0) config: %+v", c)
 	rs := RestartableServer{
 		configFile: cf,
 		hd:         &httpdown.HTTP{},
 	}
+	glog.Infof("Serve(0) config: %s", utils.ToJson(c))
 	rs.Serve(c)
 }

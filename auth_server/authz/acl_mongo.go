@@ -11,8 +11,6 @@ import (
 	"github.com/cesanta/glog"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-
-	"github.com/cesanta/docker_auth/auth_server/mgo_session"
 )
 
 type MongoACL []MongoACLEntry
@@ -35,15 +33,9 @@ type aclMongoAuthorizer struct {
 
 // NewACLMongoAuthorizer creates a new ACL MongoDB authorizer
 func NewACLMongoAuthorizer(c *utils.ACLMongoConfig) (utils.Authorizer, error) {
-	// Attempt to create new MongoDB session.
-	session, err := mgo_session.New(c.MongoConfig)
-	if err != nil {
-		return nil, err
-	}
 
 	authorizer := &aclMongoAuthorizer{
 		config:       c,
-		session:      session,
 		updateTicker: time.NewTicker(c.CacheTTL),
 	}
 

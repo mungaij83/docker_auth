@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -46,15 +47,17 @@ func ToStringMap(data interface{}) StringMap {
 }
 
 // Generate cryptographic random string
-// https://gist.github.com/dopey/c69559607800d2f2f90b1b1ed4e550fb
-func RandomString(n int) (string, error) {
+func RandomString(n int, extended bool) (string, error) {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	// Note that err == nil only if we read len(b) bytes.
 	if err != nil {
 		return "", err
 	}
-	return base64.URLEncoding.EncodeToString(b), nil
+	if extended {
+		return base64.URLEncoding.EncodeToString(b), nil
+	}
+	return base32.StdEncoding.EncodeToString(b), nil
 
 }
 func ReadJson(closer io.ReadCloser, data interface{}) error {

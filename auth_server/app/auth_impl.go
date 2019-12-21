@@ -242,11 +242,12 @@ func (as *AuthService) Authorize(ar *utils.AuthRequest) ([]utils.AuthzResult, er
 
 // https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
 func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
+	tc := &as.config.Token
+	ar.Service = tc.Issuer
 	payload, sigAlg, err := as.GetClaims(ar, ares)
 	if err != nil {
 		return nil, err
 	}
-	tc := &as.config.Token
 
 	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
 	if err != nil || sigAlg2 != sigAlg {
@@ -304,7 +305,7 @@ func (as *AuthService) GetClaims(ar *utils.AuthRequest, ares []utils.AuthzResult
 }
 
 func (as *AuthService) CreateAuthorizationToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
-	payload, err := utils.RandomString(15)
+	payload, err := utils.RandomString(15, false)
 	tc := &as.config.Token
 	_, sigAlg, err := tc.GetPrivateKey().Sign(strings.NewReader("dummy"), 0)
 	if err != nil {

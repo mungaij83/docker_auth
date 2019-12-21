@@ -2,7 +2,7 @@
 # See reference.yml for additional options.
 
 server:
-  addr: :5001
+  addr: :5002
   certificate: /ssl/certificate.pem
   key: /ssl/server.pem
 token:  # Settings for the tokens.
@@ -55,6 +55,25 @@ ldap_auth:
     groups:
       attribute: memberOf
       parse_cn: true
+mongo_auth:
+  # Name of the collection in which ACLs will be stored in MongoDB.
+  collection: "users"
+  # Unlike acl_mongo we don't cache the full user set. We just query mongo for
+  # an exact match for each authorization
+  dial_info:
+    mongo_password: 'example_pw'
+    # The MongoDB hostnames or IPs to connect to.
+    addrs: ["172.19.0.1:27017"]
+    # The time to wait for a server to respond when first connecting and on follow up session.
+    timeout: "10s"
+    # Database name that will be used on the MongoDB server.
+    database: "admin"
+    # The username with which to connect to the MongoDB server.
+    username: "techlab_rt"
+    password: "example_pw"
+    # Enable TLS connection to MongoDB (only enable this if your server supports it)
+    enable_tls: false
+
 acl:
   # This will allow authenticated users to pull/push
   - match:
