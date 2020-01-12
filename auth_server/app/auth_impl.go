@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/authn"
 	"github.com/cesanta/docker_auth/auth_server/authz"
+	"github.com/cesanta/docker_auth/auth_server/command"
+	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"math/rand"
@@ -12,6 +14,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	OpenIdAuthenticationProtocol = "openid"
+	Oauth2AutnticationProtocol   = "oauth2"
+	BasicAuthenticationProtocol  = "basic_auth"
 )
 
 type AuthService struct {
@@ -98,10 +106,25 @@ func NewAuthService(c *utils.Config) (*AuthService, error) {
 		}
 		as.authorizers = append(as.authorizers, pluginAuthz)
 	}
+	// Add all protocols if not exits
+	AddProtocol(OpenIdAuthenticationProtocol, "OpenId connect protocol")
+	AddProtocol(BasicAuthenticationProtocol, "Basic Authentication protocol")
+	AddProtocol(Oauth2AutnticationProtocol, "Oauth2 Authentication protocol")
 	return as, nil
 }
 
+func AddProtocol(protocolId, description string) {
+	var p models.AuthenticationProtocol
+	p.Description = description
+	p.ProtocolId = protocolId
+	res := <-command.DataStore.Settings().AddAuthenticationProtocol(p)
+	if res.HasError() {
+		glog.Infof("failed to add protocol: %+v", res)
+	}
+
+}
 func (as *AuthService) Authenticate(ar *utils.AuthRequest) (bool, utils.Labels, error) {
+
 	for i, a := range as.authenticators {
 		result, labels, err := a.Authenticate(ar.Account, ar.Password)
 		glog.V(2).Infof("Authn %s %s -> %t, %+v, %v", a.Name(), ar.Account, result, labels, err)
@@ -200,6 +223,7 @@ func (as *AuthService) ParseRequest(req *Context, ipAddr net.IP) (*utils.AuthReq
 }
 
 func (as *AuthService) authorizeScope(ai *utils.AuthRequestInfo) ([]string, error) {
+
 	for i, a := range as.authorizers {
 		result, err := a.Authorize(ai)
 		glog.V(2).Infof("Authz %s %s -> %s, %s", a.Name(), *ai, result, err)
@@ -420,6 +444,7 @@ func (as *AuthService) GenerateJWT(payload string, sigAlg string) (utils.StringM
 	glog.Infof("Token: %s", utils.ToJson(tokenResult))
 	tokenResult.Add(utils.JwtExpireInField, tc.Expiration)
 	tokenResult.Add(utils.JwtTokenType, "Bearer")
+	glog.V(2).Infof("generated JWT token")
 	return tokenResult, nil
 }
 
@@ -451,12 +476,31 @@ func (as *AuthService) Stop() {
 
 // Client credentials grant type
 func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, request *utils.AuthRequest, results []utils.AuthzResult) (utils.StringMap, error) {
-	c, ok := as.config.Oauth2.Clients[client.ClientId]
+	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
+	if res.HasError() {
+		glog.Infof("client not found: %+v", res)
+		return nil, res.Error
+	}
+
+	c, ok := res.Data.(*models.Clients)
 	if !ok {
 		glog.Infof("Invalid client id: %v", client.ClientId)
 		return nil, errors.New("invalid client id or secret")
 	}
-	if strings.Compare(c.ClientSecret, client.ClientSecret) != 0 {
+	// Dont allow public client to authenticate
+	switch c.ClientType {
+	case models.PublicClient:
+		glog.V(2).Infof("client [%s] is a public client. Auth denied", c.ClientId)
+		return nil, errors.New("invalid client id or secret")
+	case models.ConfidentialClient:
+		glog.V(2).Infof("client [%s] is a confidential client. Auth proceed", c.ClientId)
+		break
+	default:
+		return nil, fmt.Errorf("client type [%s] unrecognized ", c.ClientType)
+	}
+	// Validate hashed password
+	h, _ := utils.NewHashParameters(true, "", c.ClientSecret)
+	if !h.ValidateHash(client.ClientSecret) {
 		glog.Infof("invalid client secret")
 		return nil, errors.New("invalid client id or secret")
 	}

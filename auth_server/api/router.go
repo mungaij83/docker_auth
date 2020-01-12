@@ -31,8 +31,12 @@ func NewApiRouter(c *utils.Config) error {
 	InitAuth2()
 	InitOpenId()
 	// System APIs
+	InitServiceApi()
 	InitUserApi()
 	InitClientApi()
-	InitServiceApi()
+	InitRealmRolesApi()
+	InitUserRolesApi()
+	InitGroupApi()
+	InitSettingsApi()
 	return nil
 }

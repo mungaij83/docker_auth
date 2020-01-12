@@ -5,28 +5,28 @@ import (
 	"github.com/goonode/mogo"
 )
 
+// Extra user permission attributes
+type RoleAttributes struct {
+	mogo.DocumentModel `bson:",inline" collection:"sys_user_permission_attributes"`
+	AttrKey            string
+	AttrValue          string
+	PermissionRef      mogo.RefField `ref:"UserPermissions"`
+}
+
 // Defines the roles that a user has in an organization or system
 type UserRoles struct {
-	mogo.DocumentModel `bson:",inline" coll:"role-coll"`
-	RoleName           string
+	mogo.DocumentModel `bson:",inline" collection:"sys_user_roles"`
+	RoleName           string `bson:"role_name" idx:"{role_name},unique"`
 	Active             bool
+	IsDefault          bool
 	Description        string
+	RoleAttributes     [] RoleAttributes
 }
 
 // Permissions defined under a role
 type UserPermissions struct {
-	mogo.DocumentModel `bson:",inline" coll:"role-coll"`
-	PermissionName     string
+	mogo.DocumentModel `bson:",inline" collection:"sys_user_permissions"`
+	PermissionName     string `bson:"permission_name" idx:"{permission_name,role_id},unique"`
 	Active             bool
-	RoleId             bson.ObjectId
-	RoleRef            UserRoles `ref:"RealmRoles"`
-}
-
-// Extra user permission attributes
-type UserPermissionAttributes struct {
-	mogo.DocumentModel
-	AttrKey       string
-	AttrValue     string
-	PermissionId  bson.ObjectId
-	PermissionRef UserPermissions `ref:"UserPermissions"`
+	RoleRef            bson.ObjectId `bson:"role_id" ref:"RealmRoles"`
 }

@@ -158,7 +158,7 @@ func AuthorizationClient(c *app.Context, w http.ResponseWriter, r *http.Request,
 	}
 	glog.V(2).Infof("Request data: %v", utils.ToJson(c.Data))
 	client := utils.AuthDetails{
-		ClientId:     c.GetUrlParam("client_id"),
+		ClientId:     c.Data.GetString("client_id"),
 		ClientSecret: c.Data.GetString("client_secret"),
 		Scope:        c.GetUrlParam("scope"),
 		GrantType:    c.GetUrlParam("grant_type"),
@@ -253,19 +253,22 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.Au
 	// Grant token accordingly
 	switch client.GrantType {
 	case app.ClientCredentialsGrant:
-		if strings.Compare(client.ResponseType, app.AuthorizationCodeGrantType) != 0 {
+		if strings.Compare(client.ResponseType, app.AccessTokenRequestType) != 0 {
 			response.ResponseMessage = fmt.Sprintf("invalid grant type: %s", client.ResponseType)
 			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
 			app.WriteResult(w, response)
 			return
 		}
+		glog.V(2).Infof("Granting client")
 		// Generate token
 		token, err := Auth.GrantClientCredentials(client, ar, ares)
 		if err != nil {
+			glog.V(2).Infof("failed to generate token: %v", err)
 			response.ResponseMessage = err.Error()
 			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
 			app.WriteResult(w, response)
 		} else {
+			glog.V(2).Infof("authorization token: %+v", token)
 			app.WriteResult(w, token)
 		}
 		break
@@ -304,6 +307,13 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.Au
 func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []utils.AuthzResult, client utils.AuthDetails) (code utils.StringMap, ok bool) {
 	// Generate grant code or token
 	var err error
+	ok, err = OAuth2.ValidateClientDetails(client)
+	if err != nil {
+		glog.Infof("client authentication failed[%v]: %v", client.ClientId, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	switch client.ResponseType {
 	case app.AccessTokenRequestType:
 		token, err := Auth.CreateOAuthToken(ar, ares)

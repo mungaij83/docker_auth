@@ -5,54 +5,40 @@ import (
 	"github.com/goonode/mogo"
 )
 
+type UserAttributes struct {
+	mogo.DocumentModel `bson:",inline" collection:"crm_user_attributes"`
+	AttrKey            string `json:"attr_key"`
+	AttrValue          string `json:"attr_value"`
+}
+
+const (
+	ExternalAccount = "external"
+	InternalAccount = "internal"
+)
+
+// Base system users
+type BaseUsers struct {
+	mogo.DocumentModel `bson:",inline" collection:"adm_users"`
+	Username           string            `idx:"{username,allowed_system_realm},unique"`
+	Active             bool              `json:"active"`
+	AccountType        string            `bson:"account_type" json:"account_type"` // external or internal
+	HashedPassword     string            `json:"-"`
+	AllowedSystemRealm string            `bson:"allowed_system_realm"` // Reference to system scopes
+	ExtraAttributes    [] UserAttributes `json:"extra_attributes"`
+}
+
+// These are only for internal users
 type Users struct {
-	mogo.DocumentModel `bson:",inline" coll:"user-coll"`
+	mogo.DocumentModel `bson:",inline" collection:"crm_admin_users"`
 	Username           string `idx:"{username},unique"`
 	FirstName          string
 	MiddleName         string
 	Surname            string
 	EmailAddress       string `idx:"{email_address},unique"`
-	Password           string
-	Salt               string
-	Iterations         string
-	Active             bool
+	PhoneNumber        string
+	AltPhoneNumber     string
 	Description        string
+	UserId             bson.ObjectId `idx:"{user_id},unique" bson:"user_id" ref:"BaseUsers"`
 }
 
-type ExternalUsers struct {
-	mogo.DocumentModel `bson:",inline" coll:"user-coll"`
-	Username           string `idx:"{username},unique"`
-	Active             bool
-}
 
-// External users groups mappings
-type ExtUserGroups struct {
-	mogo.DocumentModel `bson:",inline" coll:"client-services-coll"`
-	UserId             bson.ObjectId `bson:"user_id"`
-	UserRef            ExternalUsers `ref:"ExternalUsers"` // Required for internal auth
-	GroupId            bson.ObjectId `bson:"group_id"`
-	GroupRef           Groups        `ref:"Groups"`
-	Active             bool
-	Description        string
-}
-
-// Define extra user attributes
-// These are only for internal users
-type UserAttributes struct {
-	mogo.DocumentModel `bson:",inline" coll:"user-coll"`
-	AttrKey            string
-	AttrValue          string
-	UserId             bson.ObjectId
-	UserRef            Users `ref:"Users"`
-}
-
-// Users groups mappings
-type UserGroups struct {
-	mogo.DocumentModel `bson:",inline" coll:"client-services-coll"`
-	UserId             bson.ObjectId `bson:"user_id"`
-	UserRef            Users         `ref:"Users"` // Required for internal auth
-	GroupId            bson.ObjectId `bson:"group_id"`
-	GroupRef           Groups        `ref:"Groups"`
-	Active             bool
-	Description        string
-}

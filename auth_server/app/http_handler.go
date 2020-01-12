@@ -59,6 +59,17 @@ func (h RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			WriteResult(w, response)
 		} else {
 			ctx.Data = data
+			// Handle server error gracefully
+			//defer func() {
+			//	if err := recover(); err != nil {
+			//		glog.V(1).Infof("Error processing request from %v: %v", utils.ToJson(ctx), err)
+			//		response := NewResultModel()
+			//		response.ResponseMessage = "invalid request received"
+			//		response.ResponseCode = strconv.FormatInt(http.StatusInternalServerError, 10)
+			//		WriteResult(w, response)
+			//	}
+			//}()
+			// Process request
 			h.handlerFunc(ctx, w, r)
 		}
 	}

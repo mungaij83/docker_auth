@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/tls"
+	"errors"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"github.com/globalsign/mgo"
@@ -11,12 +12,15 @@ import (
 )
 
 type MongoStore struct {
-	conn        *mogo.Connection
-	usrStore    UserStore
-	srvStore    ServiceStore
-	aclStore    ServiceAclStore
-	tokenStore  TokenStore
-	clientStore ClientStore
+	conn          *mogo.Connection
+	usrStore      UserStore
+	aclStore      ServiceAclStore
+	serviceStore  ServiceStore
+	tokenStore    TokenStore
+	customerStore CustomerStore
+	clientStore   ClientStore
+	settingStore  SettingsStore
+	groupStore    GroupStore
 }
 
 // Init mongo store
@@ -28,12 +32,26 @@ func NewMongoStore(c *utils.MongoConfig) (Store, error) {
 	}
 
 	st := MongoStore{conn: conn}
+	st.customerStore = NewCustomerStore(&st)
 	st.usrStore = NewMongoUserStore(&st)
-	st.srvStore = NewMongoServices(&st)
 	st.aclStore = NewMongoServiceAclStore(&st)
+	st.groupStore = NewMongoGroupStore(&st)
+	st.serviceStore = NewMongoServices(&st)
 	st.tokenStore = NewMongoTokenStore(&st)
 	st.clientStore = NewMongoClientStore(&st)
+	st.settingStore = NewMongoSettingsStore(&st)
 	return st, nil
+}
+func (nm MongoStore) GetTableName(i interface{}) (string, error) {
+	_, intp, ok := mogo.ModelRegistry.Exists(i)
+	if ok {
+		return intp.Collection, nil
+	}
+	return "", errors.New("not registered")
+
+}
+func (mn MongoStore) Customers() CustomerStore {
+	return mn.customerStore
 }
 
 func (mn MongoStore) Clients() ClientStore {
@@ -44,16 +62,23 @@ func (mn MongoStore) Tokens() TokenStore {
 	return mn.tokenStore
 }
 
+func (mm MongoStore) Services() ServiceStore {
+	return mm.serviceStore
+}
+
 func (mn MongoStore) AclStore() ServiceAclStore {
 	return mn.aclStore
 }
 
-func (mn MongoStore) Services() ServiceStore {
-	return mn.srvStore
+func (mn MongoStore) Groups() GroupStore {
+	return mn.groupStore
 }
-
 func (mn MongoStore) Users() UserStore {
 	return mn.usrStore
+}
+
+func (mm MongoStore) Settings() SettingsStore {
+	return mm.settingStore
 }
 
 func (mn MongoStore) Close() bool {

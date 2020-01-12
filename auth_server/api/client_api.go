@@ -13,46 +13,70 @@ func InitClientApi() {
 	Srv.Handle("/api/clients", app.ApiHandler(HandleListClient)).Methods(http.MethodOptions, http.MethodGet)
 	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}", app.ApiHandler(HandleDeleteClient)).Methods(http.MethodOptions, http.MethodDelete)
 	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}", app.ApiHandler(HandleGetOneClient)).Methods(http.MethodOptions, http.MethodGet)
-	// Services
-	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/service/add", app.ApiHandler(AddServiceToClient)).Methods(http.MethodOptions, http.MethodPost)
-	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/services", app.ApiHandler(GetClientServices)).Methods(http.MethodOptions, http.MethodPost)
-	Srv.Handle("/api/client/service/{client_service_id:[A-Fa-f0-9]+}", app.ApiHandler(DeleteClientServices)).Methods(http.MethodOptions, http.MethodDelete)
+	// AuthServices
+	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/realm/add", app.ApiHandler(AddClientToRealmRole)).Methods(http.MethodOptions, http.MethodPost)
+	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/roles", app.ApiHandler(GetClientRealmRoles)).Methods(http.MethodOptions, http.MethodPost)
+	Srv.Handle("/api/client/realm/{client_role_id:[A-Fa-f0-9]+}", app.ApiHandler(DeleteClientRoleAssignment)).Methods(http.MethodOptions, http.MethodDelete)
+	// Assignments
+	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/groups", app.ApiHandler(ListClientAssignedGroups)).Methods(http.MethodOptions, http.MethodGet)
+	Srv.Handle("/api/client/{client_id:[A-Fa-f0-9]+}/roles", app.ApiHandler(ListClientAssignedRoles)).Methods(http.MethodOptions, http.MethodGet)
 }
 
-func DeleteClientServices(c *app.Context, w http.ResponseWriter, r *http.Request) {
-	c.ActionName = "DeleteClientServices"
-
+func ListClientAssignedRoles(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "ListClientAssignedRoles"
 	response := app.NewResultModel()
-	clientId := c.GetPathParam("client_service_id")
-	res := <-command.DataStore.Clients().DeleteClientServices(clientId)
+	// Get client roles
+	res := <-command.DataStore.Groups().GetClientRoles(c.GetPathParam("client_id"))
 	response.FromResult(res)
 	// Result
 	app.WriteResult(w, response)
 }
 
-func GetClientServices(c *app.Context, w http.ResponseWriter, r *http.Request) {
-	c.ActionName = "GetClientServices"
+func ListClientAssignedGroups(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "ListClientAssignedGroups"
+
+	response := app.NewResultModel()
+	// Get groups
+	res := <-command.DataStore.Groups().GetClientGroups(c.GetPathParam("client_id"))
+	response.FromResult(res)
+	// Result
+	app.WriteResult(w, response)
+}
+
+func DeleteClientRoleAssignment(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "DeleteClientRoleAssignment"
+
+	response := app.NewResultModel()
+	clientId := c.GetPathParam("client_role_id")
+	res := <-command.DataStore.Clients().DeleteClientRole(clientId)
+	response.FromResult(res)
+	// Result
+	app.WriteResult(w, response)
+}
+
+func GetClientRealmRoles(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "GetClientRealmRoles"
 
 	response := app.NewResultModel()
 	clientId := c.GetPathParam("client_id")
-	res := <-command.DataStore.Clients().GetClientServices(clientId)
+	res := <-command.DataStore.Clients().GetClientRoles(clientId)
 	response.FromResult(res)
 	// Result
 	app.WriteResult(w, response)
 }
 
-func AddServiceToClient(c *app.Context, w http.ResponseWriter, r *http.Request) {
-	c.ActionName = "AddServiceToClient"
+func AddClientToRealmRole(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "AddClientToRealmRole"
 
 	response := app.NewResultModel()
 	// Add service clients
-	var clientService models.ClientServices
-	clientService.Active = c.Data.GetBool("active")
-	clientService.Description = c.Data.GetString("description")
+	var clientRole models.ClientRealmRoles
+	clientRole.Active = c.Data.GetBool("active")
+	clientRole.Description = c.Data.GetString("description")
 	clientId := c.GetPathParam("client_id")
 	serviceId := c.Data.GetString("service_id")
 	glog.V(2).Infof("client[%v], service [%v]", clientId, serviceId)
-	res := <-command.DataStore.Clients().AddService(serviceId, clientId, clientService)
+	res := <-command.DataStore.Clients().AddClientRole(serviceId, clientId, clientRole)
 	response.FromResult(res)
 	// Result
 	app.WriteResult(w, response)
@@ -97,10 +121,15 @@ func HandleCreateClient(c *app.Context, w http.ResponseWriter, _ *http.Request) 
 	var clientDetails models.Clients
 	clientDetails.ClientName = c.Data.GetString("client_name")
 	clientDetails.Active = c.Data.GetBool("active")
+	clientDetails.ClientType = c.Data.GetString("client_type")
 	clientDetails.Description = c.Data.GetString("description")
 	clientDetails.DynamicRedirect = c.Data.GetBool("dynamic_redirect")
 	clientDetails.RedirectUri = c.Data.GetString("redirect_uri")
 	clientDetails.BaseUri = c.Data.GetString("base_uri")
+	clientDetails.ImplicitFlowEnabled = c.Data.GetBool("implicit_flow_enabled")
+	clientDetails.StandardFlowEnabled = c.Data.GetBool("standard_flow_enabled")
+	clientDetails.PasswordGrantEnabled = c.Data.GetBool("password_grant_enabled")
+	clientDetails.AllowAllScope = c.Data.GetBool("allow_all_scope")
 	// Add client
 	res := <-command.DataStore.Clients().AddClient(clientDetails)
 	response.FromResult(res)

@@ -72,6 +72,14 @@ Use the following command to generate self signed certificates (test).
 ```{r, engine='bash', count_lines}
 $openssl req -newkey rsa:2048 -nodes -keyout server.pem -x509 -days 365 -out certificate.pem
 ```
+# Password storage format
+Uses  modular crypt format to store passwords using different password hashing algorithms. Supported formats include:
+|identifier|extra params|Example
+----------------------------------------
+|pbkdf2 | cost| $pbkdf2$cost$salt$hash
+
+General format: $<scheme>$<cost>$<salt>$<digest>
++ https://passlib.readthedocs.io/en/stable/modular_crypt_format.html
 
 ## Licensing
 

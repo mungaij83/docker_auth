@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/glog"
+	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
 	"github.com/goonode/mogo"
 )
@@ -14,7 +15,7 @@ type MongoUserStore struct {
 
 func NewMongoUserStore(st *MongoStore) UserStore {
 	usr := MongoUserStore{st}
-	mogo.ModelRegistry.Register(models.Users{}, models.ExternalUsers{})
+	mogo.ModelRegistry.Register(models.Users{}, models.BaseUsers{}, models.UserAttributes{})
 	return usr
 }
 
@@ -31,7 +32,7 @@ func (us MongoUserStore) GetExternalUser(userId string) DataChannel {
 		}
 		id := bson.ObjectIdHex(userId)
 		// Find document
-		existDoc := mogo.NewDoc(models.ExternalUsers{}).(*models.ExternalUsers)
+		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
 		err := existDoc.FindID(id).One(existDoc)
 		if err != nil {
 			glog.V(2).Infof("Failed to get user[%v]: %v", id, err)
@@ -49,9 +50,9 @@ func (us MongoUserStore) ListExternalUsers(page Page) DataChannel {
 	st := make(DataChannel)
 	go func() {
 		result := NewResultStore()
-		var users [] models.ExternalUsers
-		docs := mogo.NewDoc(models.ExternalUsers{}).(*models.ExternalUsers)
-		err := docs.Find(bson.M{}).Skip(page.Offset()).Limit(page.Size).All(&users)
+		var users [] models.BaseUsers
+		docs := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		err := docs.Find(bson.M{"account_type": models.ExternalAccount}).Skip(page.Offset()).Limit(page.Size).All(&users)
 		if err != nil {
 			result.Error = err
 		} else {
@@ -62,21 +63,66 @@ func (us MongoUserStore) ListExternalUsers(page Page) DataChannel {
 	return st
 }
 
-func (us MongoUserStore) GetUserForLogin(username, password string) DataChannel {
-	panic("implement me")
-}
-
-// Add external user to list of external users
-func (us MongoUserStore) AddExternalUser(user models.ExternalUsers) DataChannel {
+// Find user and validate their password
+func (us MongoUserStore) GetUserForLogin(username, password, realm string, defaultAllowed bool) DataChannel {
 	st := make(DataChannel)
 	go func() {
 		result := NewResultStore()
-		existDoc := mogo.NewDoc(models.ExternalUsers{}).(*models.ExternalUsers)
-		dd := models.ExternalUsers{}
-		err := existDoc.Find(bson.M{"username": user.Username}).One(&dd)
+		userDocs := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		var err error
+		var defaultRealm *models.SystemRealms
+		if defaultAllowed {
+			defaultRealm, err = us.Services().GetDefaultSystemRealm()
+			if err != nil {
+				result.Error = err
+				result.Success = false
+				st <- result
+				return
+			}
+		}
+		// Find account
+		q := make([]bson.M, 0)
+		q = append(q, bson.M{"username": username})
+		if defaultAllowed {
+			q = append(q, bson.M{"allowed_system_realm": defaultRealm.RealmName})
+		}
+		q = append(q, bson.M{"allowed_system_realm": realm})
+		err = userDocs.Find(q).One(userDocs)
 
 		if err != nil {
-			doc := mogo.NewDoc(user).(*models.ExternalUsers)
+			result.Error = err
+			result.Success = false
+		} else {
+			// TODO: validate password
+			result.Data = userDocs
+		}
+		st <- result
+	}()
+	return st
+}
+
+// Add external user to list of external users
+func (us MongoUserStore) AddExternalUser(user models.BaseUsers) DataChannel {
+	st := make(DataChannel)
+	go func() {
+		result := NewResultStore()
+		realmDoc := mogo.NewDoc(models.SystemRealms{}).(*models.SystemRealms)
+		err := realmDoc.Find(bson.M{"realm_name": user.AllowedSystemRealm}).One(realmDoc)
+		if err != nil {
+			result.Error = errors.New("invalid realm name")
+			result.Success = false
+			st <- result
+			return
+		}
+		// Validate use not exist
+		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		dd := models.BaseUsers{}
+		err = existDoc.Find(bson.M{"username": user.Username, "allowed_system_realm": user.AllowedSystemRealm}).One(&dd)
+		// Add use if no user with username in realm
+		if err == mgo.ErrNotFound {
+			doc := mogo.NewDoc(user).(*models.BaseUsers)
+			doc.AccountType = models.ExternalAccount
+
 			err := doc.Save()
 			if err != nil {
 				result.Error = err
@@ -86,13 +132,26 @@ func (us MongoUserStore) AddExternalUser(user models.ExternalUsers) DataChannel 
 			}
 		} else {
 			glog.V(1).Infof("user exists: %v", err)
-			result.Data = dd
+			result.Error = errors.New("user with username already exists")
+			result.Success = false
 		}
 		st <- result
 	}()
 	return st
 }
 
+func (us MongoUserStore) GetUserById(userId string) (*models.BaseUsers, error) {
+	// Check valid id
+	if !bson.IsObjectIdHex(userId) {
+		return nil, errors.New("invalid user id")
+	}
+	id := bson.ObjectIdHex(userId)
+	// Find document
+	existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+	err := existDoc.FindID(id).One(existDoc)
+
+	return existDoc, err
+}
 func (us MongoUserStore) RemoveExternalUser(userId string) DataChannel {
 	st := make(DataChannel)
 	go func() {
@@ -106,7 +165,7 @@ func (us MongoUserStore) RemoveExternalUser(userId string) DataChannel {
 		}
 		id := bson.ObjectIdHex(userId)
 		// Find document
-		existDoc := mogo.NewDoc(models.ExternalUsers{}).(*models.ExternalUsers)
+		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
 		err := existDoc.FindID(id).One(existDoc)
 		if err != nil {
 			glog.V(2).Infof("Failed to get object[%v]: %v", id, err)
@@ -121,6 +180,120 @@ func (us MongoUserStore) RemoveExternalUser(userId string) DataChannel {
 				result.Success = false
 			} else {
 				result.Data = existDoc
+			}
+		}
+		st <- result
+	}()
+	return st
+}
+
+func (us MongoUserStore) AddUserExtraAttribute(userId string, attribute models.UserAttributes) DataChannel {
+	st := make(DataChannel)
+	go func() {
+		result := NewResultStore()
+		// Check valid id
+		if !bson.IsObjectIdHex(userId) {
+			result.Error = errors.New("invalid user id")
+			result.Success = false
+			st <- result
+			return
+		}
+
+		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		err := existDoc.FindID(bson.ObjectIdHex(userId)).One(existDoc)
+		if err != nil {
+			result.Error = err
+			result.Success = false
+		} else {
+			if len(existDoc.ExtraAttributes) == 0 {
+				existDoc.ExtraAttributes = make([]models.UserAttributes, 0)
+			}
+			// Check attribute exists
+			attributeExits := -1
+			for idx, i := range existDoc.ExtraAttributes {
+				if i.AttrKey == attribute.AttrKey {
+					attributeExits = idx
+					break
+				}
+			}
+			if attributeExits >= 0 {
+				existDoc.ExtraAttributes[attributeExits].AttrValue = attribute.AttrValue
+				err = existDoc.Save()
+				if err != nil {
+					result.Error = err
+					result.Success = false
+				} else {
+					result.Data = existDoc
+				}
+			} else {
+				mn := mogo.NewDoc(attribute).(*models.UserAttributes)
+				mn.ID = bson.NewObjectId()
+
+				existDoc.ExtraAttributes = append(existDoc.ExtraAttributes, *mn)
+				err = existDoc.Save()
+				if err != nil {
+					result.Error = err
+					result.Success = false
+				} else {
+					result.Data = existDoc
+				}
+			}
+		}
+		st <- result
+	}()
+	return st
+}
+
+func (us MongoUserStore) RemoveUserExtraAttribute(userId string, attributeId string) DataChannel {
+	st := make(DataChannel)
+	go func() {
+		result := NewResultStore()
+		// Check valid id
+		if !bson.IsObjectIdHex(userId) {
+			result.Error = errors.New("invalid user id")
+			result.Success = false
+			st <- result
+			return
+		}
+		// Attributes id is valid
+		if !bson.IsObjectIdHex(attributeId) {
+			result.Error = errors.New("invalid attribute id")
+			result.Success = false
+			st <- result
+			return
+		}
+
+		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		err := existDoc.FindID(bson.ObjectIdHex(userId)).One(existDoc)
+		if err != nil {
+			result.Error = err
+			result.Success = false
+		} else if len(existDoc.ExtraAttributes) == 0 {
+			result.Error = errors.New("attribute not found")
+			result.Success = false
+		} else {
+			// Check attribute exists
+			attributeExits := -1
+			for idx, i := range existDoc.ExtraAttributes {
+				if i.ID == bson.ObjectIdHex(attributeId) {
+					attributeExits = idx
+					// Remove item at location from slice
+					existDoc.ExtraAttributes = append(existDoc.ExtraAttributes[:idx], existDoc.ExtraAttributes[idx+1:]...)
+					break
+				}
+			}
+			// show new record
+			if attributeExits >= 0 {
+				err = existDoc.Save()
+				if err != nil {
+					result.Error = err
+					result.Success = false
+				} else {
+					result.Data = existDoc
+				}
+			} else {
+				result.Error = errors.New("invalid attribute id")
+				result.Success = false
 			}
 		}
 		st <- result

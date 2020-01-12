@@ -1,5 +1,7 @@
 package utils
 
+import "strconv"
+
 type StringMap map[string]interface{}
 
 func (sm StringMap) GetString(key string) string {
@@ -12,6 +14,11 @@ func (sm StringMap) GetString(key string) string {
 	return ""
 }
 
+func (sm StringMap) ToStruct(data interface{}) error {
+	dataStr := ToJson(sm)
+	return FromJson(dataStr, data)
+}
+
 func (sm StringMap) GetBool(key string) bool {
 	val, ok := sm[key]
 	if ok {
@@ -20,6 +27,22 @@ func (sm StringMap) GetBool(key string) bool {
 		}
 	}
 	return false
+}
+
+func (sm StringMap) GetInt64(key string) int64 {
+	val, ok := sm[key]
+	if ok {
+		if vl, ok := val.(int64); ok {
+			return vl
+		}
+		if vl, ok := val.(string); ok {
+			i, err := strconv.ParseInt(vl, 10, 64)
+			if err == nil {
+				return i
+			}
+		}
+	}
+	return 0
 }
 
 func (sm StringMap) Add(key string, value interface{}) {

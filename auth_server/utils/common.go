@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/cesanta/glog"
 	"io"
 	"io/ioutil"
@@ -19,6 +20,18 @@ var WrongPass = errors.New("wrong password for user")
 func ToJson(data interface{}) string {
 	b, e := json.Marshal(data)
 	if e != nil {
+		fmt.Printf("hash failed: %v", e)
+		return "{}"
+	}
+	return string(b)
+}
+
+
+// Convert any struct into a json object
+func ToJsonPretty(data interface{}) string {
+	b, e := json.MarshalIndent(data,"","\t")
+	if e != nil {
+		fmt.Printf("hash failed: %v", e)
 		return "{}"
 	}
 	return string(b)

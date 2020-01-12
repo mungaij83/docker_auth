@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/authn"
+	"github.com/cesanta/docker_auth/auth_server/command"
+	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"reflect"
@@ -150,19 +152,53 @@ func (a Oauth2Auth) ValidateClientDetails(client utils.AuthDetails) (bool, error
 	if strings.Compare(client.ResponseType, "code") != 0 || strings.Compare(client.ResponseType, "token") != 0 {
 		return false, errors.New(fmt.Sprintf("Invalid request type: %v", client.ResponseType))
 	}
-	c, ok := a.config.Clients[client.ClientId]
+	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
+	if res.HasError() {
+		return false, res.Error
+	}
+	c, ok := res.Data.(*models.Clients)
 	if !ok {
 		return false, errors.New(fmt.Sprintf("Invalid client id: %v", client.ClientId))
 	}
-	// TODO: Check remote host
-	scopes := strings.Split(client.Scope, ":")
-	var err error
-	for _, v := range scopes {
-		if !itemExists(c.Scopes, v) {
-			err = errors.New(fmt.Sprintf("invalid scope: %v", v))
-			break
+	// Check grant type allowed on client
+	switch client.GrantType {
+	case AuthorizationCodeGrantType:
+		if !c.StandardFlowEnabled {
+			return false, errors.New("client is not allowed to request access code")
 		}
+		break
+	case ImplicitGrant:
+		if !c.ImplicitFlowEnabled {
+			return false, errors.New("client is not allowed to request access token")
+		}
+		break
+	case PasswordGrant:
+		if !c.PasswordGrantEnabled {
+			return false, errors.New("client is not allowed to direct grant")
+		}
+		break
+	case ClientCredentialsGrant:
+		// Validate hashed password
+		h, _ := utils.NewHashParameters(true, "", c.ClientSecret)
+		if !h.ValidateHash(client.ClientSecret) {
+			glog.Infof("invalid client secret")
+			return false, errors.New("invalid client id or secret")
+		}
+		break
+	default:
+		return false, fmt.Errorf("invalid grant type %s", client.GrantType)
 	}
+
+	// TODO: Check remote host
+	//scopes := strings.Split(client.Scope, ":")
+	var err error
+	//for _, v := range scopes {
+	// TODO: check allowed scope
+	//if !itemExists(c.Scopes, v) {
+	//	err = errors.New(fmt.Sprintf("invalid scope: %v", v))
+	//	break
+	//}
+	//}
 	return true, err
 }
 

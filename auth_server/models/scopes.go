@@ -6,17 +6,10 @@ import (
 )
 
 type Scope struct {
-	mogo.DocumentModel
-	ScopeName   string `bson:"{scope_name},unique"`
-	Active      bool
-	Description string
-}
-
-// Extra scope attributes
-type ScopeAttributes struct {
-	mogo.DocumentModel
-	AttrKey   string
-	AttrValue string
-	ScopeId   bson.ObjectId
-	ScopeRef  Scope `ref:"Scope"`
+	mogo.DocumentModel `bson:",inline" collection:"auth_service_scopes"`
+	ScopeName          string `bson:"scope_name" idx:"{scope_name,service_Id},unique"`
+	Active             bool
+	Description        string
+	ServiceId          bson.ObjectId `bson:"service_id"`
+	RolesRefs          [] string
 }

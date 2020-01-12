@@ -18,14 +18,24 @@ type ResultModel struct {
 func NewResultModel() ResultModel {
 	return ResultModel{ResponseCode: strconv.FormatInt(http.StatusOK, 10)}
 }
+
+func (response *ResultModel) SetResponseCode(i int64) {
+	response.ResponseCode = strconv.FormatInt(i, 10)
+}
+
 func (response *ResultModel) FromResult(res store.ResultStore) {
 	response.Data = res.Data
 	if res.Success {
 		response.ResponseCode = strconv.FormatInt(http.StatusOK, 10)
 		response.ResponseMessage = "Success"
 	} else {
-		response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
-		response.ResponseMessage = res.Error.Error()
+		if res.Error != nil {
+			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
+			response.ResponseMessage = res.Error.Error()
+		} else {
+			response.ResponseCode = strconv.FormatInt(http.StatusInternalServerError, 10)
+			response.ResponseMessage = "request failed"
+		}
 	}
 }
 

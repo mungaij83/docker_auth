@@ -17,6 +17,7 @@ func InitAuth() {
 
 // Handle github authentication
 func GithubAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request) {
+	c.ActionName = "GithubAuthentication"
 	if Auth.GoogleAuthEnabled() {
 		url := Auth.GetServerConfig().PathPrefix + "/github_auth"
 		http.Redirect(w, r, url, 301)
@@ -26,6 +27,7 @@ func GithubAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request
 }
 
 func GoogleAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request) {
+	c.ActionName = "GoogleAuthentication"
 	if Auth.GithubAuthEnabled() {
 		url := Auth.GetServerConfig().PathPrefix + "/github_auth"
 		http.Redirect(w, r, url, 301)
@@ -35,7 +37,7 @@ func GoogleAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request
 	}
 }
 
-func HandleAuth(c *app.Context, rw http.ResponseWriter, r *http.Request) {
+func HandleAuth(c *app.Context, rw http.ResponseWriter, _ *http.Request) {
 	ar, err := Auth.ParseRequest(c, c.GetIp())
 	ares := make([]utils.AuthzResult, 0)
 	if err != nil {
@@ -65,7 +67,8 @@ func HandleAuth(c *app.Context, rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// Authentication-only request ("docker login"), pass through.
+		http.Error(rw, "authorization failed: no scope", http.StatusBadRequest)
+		return
 	}
 	token, err := Auth.CreateToken(ar, ares)
 	if err != nil {
@@ -83,7 +86,8 @@ func HandleAuth(c *app.Context, rw http.ResponseWriter, r *http.Request) {
 }
 
 // https://developers.google.com/identity/sign-in/web/server-side-flow
-func HandleIndex(c *app.Context, w http.ResponseWriter, r *http.Request) {
+func HandleIndex(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "HandleIndex"
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, "<h1>%s</h1>\n", Auth.GetToken().Issuer)
 }
