@@ -74,7 +74,6 @@ type AuthzResult struct {
 	AutorizedActions []string
 }
 
-
 type PasswordString string
 
 func (ps PasswordString) String() string {
@@ -169,6 +168,7 @@ type LabelMap struct {
 
 type PrincipalDetails struct {
 	UserId       string `json:"-"`
+	Type         string `json:"-"`
 	Username     string
 	EmailAddress string
 	Active       bool

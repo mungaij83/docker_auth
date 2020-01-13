@@ -38,7 +38,7 @@ const (
 )
 
 type ExtAuthResponse struct {
-	Labels utils.Labels `json:"labels,omitempty"`
+	Labels utils.StringMap `json:"labels,omitempty"`
 }
 
 
@@ -51,7 +51,7 @@ func NewExtAuth(cfg *utils.ExtAuthConfig) *extAuth {
 	return &extAuth{cfg: cfg}
 }
 
-func (ea *extAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (ea *extAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.StringMap, error) {
 	cmd := exec.Command(ea.cfg.Command, ea.cfg.Args...)
 	cmd.Stdin = strings.NewReader(fmt.Sprintf("%s %s", user, string(password)))
 	output, err := cmd.Output()

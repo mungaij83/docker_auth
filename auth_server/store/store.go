@@ -53,7 +53,7 @@ type Store interface {
 	Tokens() TokenStore
 	Clients() ClientStore
 	Settings() SettingsStore
-	ParseRoles(string, bool)
+	ParseRoles([]utils.StringMap, bool) []utils.AuthzResult
 	Close() bool
 }
 
@@ -71,7 +71,7 @@ type UserStore interface {
 	GetExternalUser(userId string) DataChannel
 	RemoveExternalUser(userId string) DataChannel
 	// Roles
-	GetUserRoles(userId string) []utils.AuthzResult
+	GetUserRoles(userId string, realm string, isUsername bool) []utils.AuthzResult
 	// Extra attributes
 	AddUserExtraAttribute(userId string, attribute models.UserAttributes) DataChannel
 	RemoveUserExtraAttribute(userId string, attributeId string) DataChannel
@@ -183,6 +183,9 @@ type ClientStore interface {
 	GetClientById(clientId string) DataChannel
 	ClientById(clientId string) (*models.Clients, error)
 	GetClientByClientId(clientId string) DataChannel
+	ClientByClientId(clientId string) (*models.Clients, error)
+	//
+	GetClientForLogin(clientId, clientSecret string, validateSecret bool) DataChannel
 	// Roles
 	AddClientRole(roleId string, clientId string, clientService models.ClientRealmRoles) DataChannel
 	GetClientRoles(clientId string) DataChannel

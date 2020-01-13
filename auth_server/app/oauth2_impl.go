@@ -9,7 +9,6 @@ import (
 	"github.com/cesanta/glog"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -156,7 +155,7 @@ func (a Oauth2Auth) ValidateAuthToken(token utils.TokenDetails) (utils.StringMap
 			return nil, err
 		}
 		sigAlg := details.GetString(utils.AlgorithmField)
-		return a.auth.ValidateJWT(token.AccessToken, sigAlg, false)
+		return a.auth.ValidateJWT(token.AccessToken, sigAlg, true)
 	default:
 		return nil, errors.New(fmt.Sprintf("invalid request type: %v", token.RequestType))
 	}
@@ -179,9 +178,11 @@ func (a Oauth2Auth) ValidateResponseCode(client utils.AuthDetails) (utils.String
 	if err != nil {
 		return nil, err
 	}
+	// Delete access token
 	err = a.auth.tokenDB.DeleteTokenNs(client.AuthorizationCode, AuthorizationCodeRequestType)
 	if err != nil {
 		glog.V(3).Infof("Failed to delete token from store: %+v", err)
+		return nil, errors.New("invalid client id /secret")
 	}
 	glog.V(2).Infof("Token retrieved from db: %+v", data)
 	signAlg := data.GetString(utils.AlgorithmField)
@@ -203,28 +204,24 @@ func (a Oauth2Auth) ValidateResponseCode(client utils.AuthDetails) (utils.String
 // Password grant token generation
 // Validate client password before token generation
 func (a Oauth2Auth) PasswordGrantToken(request *utils.AuthRequest, results []utils.AuthzResult, client utils.AuthDetails) (utils.StringMap, error) {
-	c, ok := a.config.Clients[client.ClientId]
-	if !ok {
-		glog.Infof("Client not found")
-		return nil, fmt.Errorf("invalid client credentials or details: %s", client.ClientId)
+	res := <-command.DataStore.Clients().GetClientForLogin(client.ClientId, client.ClientSecret, true)
+	if res.HasError() {
+		glog.V(2).Infof("Client not found: %v", res.Error)
+		return nil, res.Error
 	}
-	if strings.Compare(c.ClientSecret, client.ClientSecret) != 0 {
-		glog.Infof("Invalid client secret: %s", client.ClientSecret)
-		return nil, fmt.Errorf("invalid client credentials or details: %s", client.ClientId)
+	// Authorize user
+	ok, principal, err := a.auth.AuthenticateUser(request)
+	if err != nil || !ok {
+		glog.V(2).Infof("user find failed[%v]: %v", ok, err)
+		return nil, err
 	}
-	principal := utils.PrincipalDetails{
-		Username:  request.User,
-		Active:    true,
-		RealmName: c.ClientName,
-	}
-	principal.Roles = command.DataStore.Clients().ClientRoles(client.ClientId)
 	// Access token payload
-	payload, sigAlg, err := a.jwt.GetClaims(principal, true)
+	payload, sigAlg, err := a.jwt.GetClaims(*principal, true)
 	if err != nil {
 		return nil, err
 	}
 	// Refresh token payload
-	altPayload, sigAlg, err := a.jwt.GetClaims(principal, false)
+	altPayload, sigAlg, err := a.jwt.GetClaims(*principal, false)
 	if err != nil {
 		return nil, err
 	}

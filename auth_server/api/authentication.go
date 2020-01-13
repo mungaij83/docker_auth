@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/api/forms"
 	"github.com/cesanta/docker_auth/auth_server/app"
+	"github.com/cesanta/docker_auth/auth_server/command"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"net/http"
@@ -10,9 +12,44 @@ import (
 
 func InitAuth() {
 	Srv.Handle("/", app.ApiHandler(HandleIndex))
-	Srv.Handle("/auth", app.ApiHandler(HandleAuth))
+	Srv.Handle("/auth", app.ApiHandler(HandleAuth)).Methods(http.MethodOptions, http.MethodPost, http.MethodGet)
+	Srv.Handle("/api/login", app.ApiHandler(LoginAdminUsers)).Methods(http.MethodOptions, http.MethodPost)
 	Srv.Handle("/google_auth", app.ApiHandler(GoogleAuthentication))
 	Srv.Handle("/github_auth", app.ApiHandler(GithubAuthentication))
+}
+
+func LoginAdminUsers(c *app.Context, w http.ResponseWriter, _ *http.Request) {
+	c.ActionName = "LoginAdminUsers"
+	response := app.NewResultModel()
+	var loginForm forms.LoginForm
+	err := c.Data.ToStruct(&loginForm)
+	if err != nil {
+		response.ResponseMessage = "Could not decode request"
+		response.SetResponseCode(http.StatusUnprocessableEntity)
+		app.WriteResult(w, response)
+		return
+	}
+	// Authenticate user
+	res := <-command.DataStore.Users().GetUserForLogin(loginForm.Username, loginForm.Password, "", true)
+	if res.HasError() {
+		response.ResponseMessage = res.Error.Error()
+		response.SetResponseCode(http.StatusBadRequest)
+		app.WriteResult(w, response)
+		return
+	}
+	principal := res.Data.(utils.PrincipalDetails)
+	// Add roles and generate token
+	principal.Roles = command.DataStore.Users().GetUserRoles(principal.UserId, principal.RealmName, false)
+	token, err := Auth.CreateToken(principal)
+	if err != nil {
+		response.ResponseMessage = err.Error()
+		response.SetResponseCode(http.StatusBadRequest)
+	} else {
+		response.Data = token
+	}
+
+	app.WriteResult(w, response)
+
 }
 
 // Handle github authentication
@@ -39,38 +76,25 @@ func GoogleAuthentication(c *app.Context, w http.ResponseWriter, r *http.Request
 
 func HandleAuth(c *app.Context, rw http.ResponseWriter, _ *http.Request) {
 	ar, err := Auth.ParseRequest(c, c.GetIp())
-	ares := make([]utils.AuthzResult, 0)
 	if err != nil {
 		glog.Warningf("Bad request: %s", err)
 		http.Error(rw, fmt.Sprintf("Bad request: %s", err), http.StatusBadRequest)
 		return
 	}
 	glog.V(2).Infof("Auth request: %+v", ar)
-	{
-		authnResult, labels, err := Auth.Authenticate(ar)
-		if err != nil {
-			http.Error(rw, fmt.Sprintf("Authentication failed (%s)", err), http.StatusInternalServerError)
-			return
-		}
-		if !authnResult {
-			glog.Warningf("Auth failed: %s", *ar)
-			rw.Header()["WWW-Authenticate"] = []string{fmt.Sprintf(`Basic realm="%s"`, Auth.GetToken().Issuer)}
-			http.Error(rw, "Auth failed.", http.StatusUnauthorized)
-			return
-		}
-		ar.Labels = labels
-	}
-	if len(ar.Scopes) > 0 {
-		ares, err = Auth.Authorize(ar)
-		if err != nil {
-			http.Error(rw, fmt.Sprintf("Authorization failed (%s)", err), http.StatusInternalServerError)
-			return
-		}
-	} else {
-		http.Error(rw, "authorization failed: no scope", http.StatusBadRequest)
+	authnResult, principal, err := Auth.AuthenticateUser(ar)
+	if err != nil {
+		http.Error(rw, fmt.Sprintf("Authentication failed (%s)", err), http.StatusInternalServerError)
 		return
 	}
-	token, err := Auth.CreateToken(ar, ares)
+	if !authnResult {
+		glog.Warningf("Auth failed: %s", *ar)
+		rw.Header()["WWW-Authenticate"] = []string{fmt.Sprintf(`Basic realm="%s"`, Auth.GetToken().Issuer)}
+		http.Error(rw, "Auth failed.", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := Auth.CreateToken(*principal)
 	if err != nil {
 		msg := fmt.Sprintf("Failed to generate token %s", err)
 		http.Error(rw, msg, http.StatusInternalServerError)

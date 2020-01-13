@@ -16,21 +16,21 @@ const (
 // 2. public clients can be used with SPA applications
 type Clients struct {
 	mogo.DocumentModel   `bson:",inline" collection:"dat_clients"`
-	ClientName           string
-	AppRealm             string // Application Realm
-	ClientType           string // public or confidential
-	ClientProtocol       string // openid, oauth2, basic_auth
-	DynamicRedirect      bool
-	RedirectUri          string
-	BaseUri              string
-	Description          string
-	StandardFlowEnabled  bool
-	ImplicitFlowEnabled  bool
-	PasswordGrantEnabled bool
-	AllowAllScope        bool
-	Active               bool
+	ClientName           string `json:"client_name"`
+	AppRealm             string `json:"app_realm"`       // Application Realm
+	ClientType           string `json:"client_type"`     // public or confidential
+	ClientProtocol       string `json:"client_protocol"` // openid, oauth2, basic_auth
+	DynamicRedirect      bool   `json:"dynamic_redirect"`
+	RedirectUri          string `json:"redirect_uri"`
+	BaseUri              string `json:"base_uri"`
+	Description          string `json:"description"`
+	StandardFlowEnabled  bool   `json:"standard_flow_enabled"`
+	ImplicitFlowEnabled  bool   `json:"implicit_flow_enabled"`
+	PasswordGrantEnabled bool   `json:"password_grant_enabled"`
+	AllowAllScope        bool   `json:"allow_all_scope"`
+	Active               bool   `json:"active"`
 	ClientId             string `bson:"client_id" idx:"{client_id},unique"`
-	ClientSecret         string `json:"client_secret"`
+	ClientSecret         string `json:"-"`
 	ClientSecret2        string `json:"-"`
 }
 

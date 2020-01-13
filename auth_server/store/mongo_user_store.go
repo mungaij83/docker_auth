@@ -48,8 +48,18 @@ func (us MongoUserStore) GetExternalUser(userId string) DataChannel {
 	}()
 	return st
 }
-func (us MongoUserStore) GetUserRoles(userId string) []utils.AuthzResult {
+func (us MongoUserStore) GetUserRoles(userId string, realm string, isUsername bool) []utils.AuthzResult {
 	roles := make([]utils.AuthzResult, 0)
+	if isUsername {
+		docs := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
+		err := docs.Find(bson.M{"username": userId, "allowed_system_realm": realm}).One(docs)
+		if err != nil {
+			glog.V(2).Infof("invalid user account: %v", err)
+			return roles
+		} else {
+			userId = docs.ID.Hex()
+		}
+	}
 	res := <-us.Groups().GetUserRoles(userId)
 	if res.HasError() {
 		return roles
@@ -83,7 +93,6 @@ func (us MongoUserStore) GetUserForLogin(username, password, realm string, defau
 	st := make(DataChannel)
 	go func() {
 		result := NewResultStore()
-		userDocs := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
 		var err error
 		var defaultRealm *models.SystemRealms
 		if defaultAllowed {
@@ -95,21 +104,24 @@ func (us MongoUserStore) GetUserForLogin(username, password, realm string, defau
 				return
 			}
 		}
-		// Find account
-		q := make([]bson.M, 0)
-		q = append(q, bson.M{"username": username})
+		// Find account within the default realm or account realm
+		q := bson.M{"username": username}
 		if defaultAllowed {
-			q = append(q, bson.M{"allowed_system_realm": defaultRealm.RealmName})
+			q["allowed_system_realm"] = bson.M{"$in": []string{defaultRealm.RealmName, realm}}
+		} else {
+			q["allowed_system_realm"] = realm
 		}
-		q = append(q, bson.M{"allowed_system_realm": realm})
+
+		userDocs := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)
 		err = userDocs.Find(q).One(userDocs)
 		// User not found
 		if err != nil {
-			glog.V(2).Infof("user details not found: %v", err)
+			glog.V(2).Infof("user details not found[%+v]: %v", q, err)
 			result.Error = fmt.Errorf("invalid username or password")
 			result.Success = false
-		} else if strings.Compare(realm, userDocs.AllowedSystemRealm) != 0 { // don't allow other realm users
-			result.Error = fmt.Errorf("invalid user realm: %v", realm)
+		} else if strings.Compare(userDocs.AccountType, models.ExternalAccount) == 0 {
+			glog.V(2).Infof("external account[%v] cannot login", username)
+			result.Error = fmt.Errorf("invalid username or password")
 			result.Success = false
 		} else {
 			// Validate user password
@@ -137,12 +149,25 @@ func (us MongoUserStore) AddExternalUser(user models.BaseUsers) DataChannel {
 	go func() {
 		result := NewResultStore()
 		realmDoc := mogo.NewDoc(models.SystemRealms{}).(*models.SystemRealms)
-		err := realmDoc.Find(bson.M{"realm_name": user.AllowedSystemRealm}).One(realmDoc)
+		opts := make([]bson.M, 0)
+		if len(user.AllowedSystemRealm) > 0 {
+			opts = append(opts, bson.M{"realm_name": user.AllowedSystemRealm})
+			opts = append(opts, bson.M{"RealmName": user.AllowedSystemRealm})
+		} else {
+			opts = append(opts, bson.M{"is_default": true})
+			opts = append(opts, bson.M{"realm_name": "default"})
+			opts = append(opts, bson.M{"RealmName": "default"})
+		}
+		err := realmDoc.Find(bson.M{"$or": opts}).One(realmDoc)
 		if err != nil {
-			result.Error = errors.New("invalid realm name")
+			result.Error = fmt.Errorf("invalid realm name[%s]: %v", user.AllowedSystemRealm, err)
 			result.Success = false
 			st <- result
 			return
+		}
+		// Override
+		if realmDoc.IsDefault {
+			user.AllowedSystemRealm = realmDoc.RealmName
 		}
 		// Validate use not exist
 		existDoc := mogo.NewDoc(models.BaseUsers{}).(*models.BaseUsers)

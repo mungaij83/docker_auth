@@ -42,10 +42,11 @@ func NewAuthService(c *utils.Config) (*AuthService, error) {
 		return nil, err
 	}
 	as := &AuthService{
-		config:      c,
-		tokenDB:     db,
-		jwt:         Jwt{Config: c.Token},
-		authorizers: make([]utils.Authorizer, 0),
+		config:         c,
+		tokenDB:        db,
+		jwt:            Jwt{Config: c.Token},
+		authenticators: make(map[string]utils.Authenticator),
+		authorizers:    make([]utils.Authorizer, 0),
 	}
 	// Authorizers
 	if c.ACL != nil {
@@ -171,7 +172,7 @@ func (as *AuthService) AuthenticateUser(ar *utils.AuthRequest) (bool, *utils.Pri
 
 // Validate request type, client_id, and request direction
 func (as *AuthService) ValidateClientDetails(client utils.AuthDetails) (bool, error) {
-	if strings.Compare(client.ResponseType, "code") != 0 || strings.Compare(client.ResponseType, "token") != 0 {
+	if strings.Compare(client.ResponseType, "code")!=0  || strings.Compare(client.ResponseType, "token") != 0 {
 		return false, errors.New(fmt.Sprintf("Invalid request type: %v", client.ResponseType))
 	}
 	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
@@ -254,6 +255,7 @@ func (as *AuthService) ParseRequest(req *Context, ipAddr net.IP) (*utils.AuthReq
 		scope = req.GetUrlParam("scope")
 		ar.User = req.Data.GetString("username")
 		ar.Account = ar.User
+		ar.ClientId = req.GetUrlParam("client_id")
 		ar.Password = utils.PasswordString(req.Data.GetString("password"))
 	} else if req.IsMultipart() {
 		scope = req.FormData.Get("scope")
@@ -405,7 +407,6 @@ func (as *AuthService) CreateOAuthToken(principal utils.PrincipalDetails) (utils
 	if err != nil {
 		return nil, err
 	}
-
 	refreshPayload, _, err := as.jwt.GetClaims(principal, false)
 	if err != nil {
 		return nil, err
@@ -441,35 +442,31 @@ func (as *AuthService) Stop() {
 }
 
 // Client credentials grant type
-func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, principal utils.PrincipalDetails) (utils.StringMap, error) {
-	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
-	if res.HasError() {
-		glog.Infof("client not found: %+v", res)
-		return nil, res.Error
+func (as *AuthService) GrantClientCredentials(client utils.AuthDetails) (utils.StringMap, error) {
+	loginRes := <-command.DataStore.Clients().GetClientForLogin(client.ClientId, client.ClientSecret, true)
+	if loginRes.HasError() {
+		glog.Infof("client not found: %+v", loginRes.Error)
+		return nil, loginRes.Error
 	}
 
-	c, ok := res.Data.(*models.Clients)
+	principal, ok := loginRes.Data.(utils.PrincipalDetails)
 	if !ok {
 		glog.Infof("Invalid client id: %v", client.ClientId)
 		return nil, errors.New("invalid client id or secret")
 	}
 	// Dont allow public client to authenticate
-	switch c.ClientType {
+	switch principal.Type {
 	case models.PublicClient:
-		glog.V(2).Infof("client [%s] is a public client. Auth denied", c.ClientId)
+		glog.V(2).Infof("client [%s] is a public client. Auth denied", principal.Username)
 		return nil, errors.New("invalid client id or secret")
 	case models.ConfidentialClient:
-		glog.V(2).Infof("client [%s] is a confidential client. Auth proceed", c.ClientId)
+		glog.V(2).Infof("client [%s] is a confidential client. Auth proceed", principal.Username)
 		break
 	default:
-		return nil, fmt.Errorf("client type [%s] unrecognized ", c.ClientType)
+		return nil, fmt.Errorf("client type [%s] unrecognized ", principal.Type)
 	}
-	// Validate hashed password
-	h, _ := utils.NewHashParameters(true, "", c.ClientSecret)
-	if !h.ValidateHash(client.ClientSecret) {
-		glog.Infof("invalid client secret")
-		return nil, errors.New("invalid client id or secret")
-	}
+	// Validate account details
+
 	payload, sigAlg, err := as.jwt.GetClaims(principal, true)
 	if err != nil {
 		return nil, err

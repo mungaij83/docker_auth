@@ -108,7 +108,7 @@ func HandleLoginRequest(c *app.Context, w http.ResponseWriter, _ *http.Request) 
 	errorList, ok := client.Validate()
 	if ok {
 		errorList = utils.StringMap{}
-		ok, err := OAuth2.ValidateClientDetails(client)
+		ok, err := Auth.ValidateClientDetails(client)
 		if err != nil {
 			errorList.Add("error", err.Error())
 			app.WriteTemplate(w, errorList, "templates/login_check_failed.html")
@@ -200,17 +200,8 @@ func AuthorizationClient(c *app.Context, w http.ResponseWriter, r *http.Request,
 		okCode = true
 		break
 	case app.AuthorizationCodeGrantType, app.ImplicitGrant:
-		_, err = OAuth2.ValidateAccount(ar.Account, ar.Password)
-		if err != nil {
-			glog.V(2).Infof("Bad request: %s", err)
-			response.ResponseMessage = fmt.Sprintf("Invalid username of password: %s", err)
-			response.ResponseCode = strconv.FormatInt(http.StatusBadRequest, 10)
-			w.WriteHeader(http.StatusBadRequest)
-			app.WriteResult(w, response)
-		} else {
-			glog.V(2).Infof("Authorization success")
-			okCode = true
-		}
+		glog.V(2).Infof("Authorization success")
+		okCode = true
 		break
 	default:
 		response.ResponseMessage = fmt.Sprintf("invalid request: %s", expectedType)
@@ -261,7 +252,7 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.Au
 		}
 		glog.V(2).Infof("Granting client")
 		// Generate token
-		token, err := Auth.GrantClientCredentials(client, ar, ares)
+		token, err := Auth.GrantClientCredentials(client)
 		if err != nil {
 			glog.V(2).Infof("failed to generate token: %v", err)
 			response.ResponseMessage = err.Error()
@@ -307,7 +298,7 @@ func GenerateToken(w http.ResponseWriter, ar *utils.AuthRequest, client utils.Au
 func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []utils.AuthzResult, client utils.AuthDetails) (code utils.StringMap, ok bool) {
 	// Generate grant code or token
 	var err error
-	ok, err = OAuth2.ValidateClientDetails(client)
+	ok, err = Auth.ValidateClientDetails(client)
 	if err != nil {
 		glog.Infof("client authentication failed[%v]: %v", client.ClientId, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -316,7 +307,13 @@ func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []util
 
 	switch client.ResponseType {
 	case app.AccessTokenRequestType:
-		token, err := Auth.CreateOAuthToken(ar, ares)
+		_, principal, err := Auth.AuthenticateUser(ar)
+		if err != nil {
+			glog.Infof("client authentication failed[%v]: %v", ar.User, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		token, err := Auth.CreateOAuthToken(*principal)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to generate token %s", err)
 			http.Error(w, msg, http.StatusInternalServerError)
@@ -326,7 +323,7 @@ func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []util
 		app.WriteResult(w, token)
 		break
 	case app.AuthorizationCodeRequestType:
-		code, err = OAuth2.CreateAuthorizationCode(ar, ares)
+		code, err = OAuth2.CreateAuthorizationCode(ar)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to generate token %s", err)
 			http.Error(w, msg, http.StatusInternalServerError)
@@ -346,6 +343,7 @@ func GenerateAuthToken(w http.ResponseWriter, ar *utils.AuthRequest, ares []util
 		}
 		break
 	default:
+		glog.V(2).Infof("invalid response type: %v",client.ResponseType)
 		http.Error(w, fmt.Sprintf("Invalid request type: %v", client.ResponseType), http.StatusBadRequest)
 	}
 	return

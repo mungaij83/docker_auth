@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/docker_auth/auth_server/utils"
@@ -12,6 +13,53 @@ import (
 
 type MongoClientStore struct {
 	*MongoStore
+}
+
+func NewMongoClientStore(st *MongoStore) ClientStore {
+	str := MongoClientStore{st}
+	mogo.ModelRegistry.Register(models.Clients{}, models.ClientRealmRoles{})
+	return str
+}
+
+// Get client principal and validate client secret
+func (cs MongoClientStore) GetClientForLogin(clientId, clientSecret string, validateSecret bool) DataChannel {
+	st := make(DataChannel)
+	go func() {
+		result := NewResultStore()
+		client, err := cs.ClientByClientId(clientId)
+		if err != nil {
+			result.Error = err
+			result.Success = false
+			st <- result
+			return
+		} else if !client.Active { // Check client is enabled
+			result.Error = errors.New("invalid client id or secret")
+			result.Success = false
+			st <- result
+			return
+		}
+
+		principal := utils.PrincipalDetails{
+			UserId:    client.ID.Hex(),
+			Username:  client.ClientId,
+			Active:    client.Active,
+			RealmName: client.AppRealm,
+			Type:      client.ClientType,
+			Roles:     make([]utils.AuthzResult, 0),
+		}
+		// Load and validate password if required
+		h, _ := utils.NewHashParameters(true, "", client.ClientSecret)
+		if validateSecret && !h.ValidateHash(clientSecret) {
+			result.Error = errors.New("invalid client id or secret")
+			result.Success = false
+			st <- result
+			return
+		}
+		result.Data = principal
+		result.Success = true
+		st <- result
+	}()
+	return st
 }
 
 func (cs MongoClientStore) ClientRoles(clientId string) []utils.AuthzResult {
@@ -26,12 +74,6 @@ func (cs MongoClientStore) ClientRoles(clientId string) []utils.AuthzResult {
 	}
 
 	return cs.ParseRoles(data, true)
-}
-
-func NewMongoClientStore(st *MongoStore) ClientStore {
-	str := MongoClientStore{st}
-	mogo.ModelRegistry.Register(models.Clients{}, models.ClientRealmRoles{})
-	return str
 }
 
 func (cs MongoClientStore) MakeDoc() *models.Clients {
@@ -212,6 +254,12 @@ func (cs MongoClientStore) ClientById(clientId string) (*models.Clients, error) 
 
 	client := cs.MakeDoc()
 	err := client.FindByID(bson.ObjectIdHex(clientId), client)
+	return client, err
+}
+
+func (cs MongoClientStore) ClientByClientId(clientId string) (*models.Clients, error) {
+	client := cs.MakeDoc()
+	err := client.Find(bson.M{"client_id": clientId}).One(client)
 	return client, err
 }
 

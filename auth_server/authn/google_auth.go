@@ -313,7 +313,7 @@ func (ga *GoogleAuth) doGoogleAuthSignOut(rw http.ResponseWriter, token string) 
 	_, _ = fmt.Fprint(rw, "signed out")
 }
 
-func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString, realm string) (bool, utils.Labels, error) {
+func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString, realm string) (bool, *utils.PrincipalDetails, error) {
 	err := ga.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = ga.validateServerToken(user)
@@ -323,7 +323,14 @@ func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString, r
 	} else if err != nil {
 		return false, nil, err
 	}
-	return true, nil, nil
+	principal := &utils.PrincipalDetails{
+		Username:  user,
+		RealmName: realm,
+		Active:    true,
+		Roles:     make([]utils.AuthzResult, 0),
+	}
+
+	return true, principal, nil
 }
 
 func (ga *GoogleAuth) Stop() {

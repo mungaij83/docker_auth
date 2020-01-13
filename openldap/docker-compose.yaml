@@ -61,16 +61,16 @@ services:
       - '/var/log/docker/auth:/logs'
     depends_on:
       - ldap_server
-  mongo_data:
-    image: mongo:4.0.4
-    container_name: mongo_db
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: techlab_rt
-      MONGO_INITDB_ROOT_PASSWORD: example_pw
-    ports:
-      - "27017:27017"
-    volumes:
-      - /srv/docker/mongo/data:/data/db
+  #mongo_data:
+  #  image: mongo:4.0.4
+  #  container_name: mongo_db
+  #  environment:
+  #    MONGO_INITDB_ROOT_USERNAME: techlab_rt
+  #    MONGO_INITDB_ROOT_PASSWORD: example_pw
+  #  ports:
+  #    - "27017:27017"
+  #  volumes:
+  #    - /srv/docker/mongo/data:/data/db
   phpldapadmin:
     image: osixia/phpldapadmin:latest
     container_name: phpldapadmin

@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	hostPortRegex = regexp.MustCompile(`\[?(.+?)\]?:\d+$`)
+	hostPortRegex = regexp.MustCompile(`\[?(.+?)]?:\d+$`)
 )
 
 type RequestHandlerFunc func(c *Context, w http.ResponseWriter, r *http.Request)

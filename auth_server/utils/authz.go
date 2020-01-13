@@ -52,7 +52,7 @@ type AuthRequestInfo struct {
 	Service string
 	IP      net.IP
 	Actions []string
-	Labels  Labels
+	Labels  StringMap
 }
 
 func (ai AuthRequestInfo) String() string {

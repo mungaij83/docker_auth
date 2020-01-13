@@ -61,7 +61,7 @@ func AddRoleToScopes(c *app.Context, w http.ResponseWriter, _ *http.Request) {
 	app.WriteResult(w, response)
 }
 
-func GetServiceScopeById(c *app.Context, w http.ResponseWriter, r *http.Request) {
+func GetServiceScopeById(c *app.Context, w http.ResponseWriter, _ *http.Request) {
 	c.ActionName = "GetServiceScopeById"
 	response := app.NewResultModel()
 	// Scope
@@ -120,7 +120,7 @@ func DeleteSystemRealmById(c *app.Context, w http.ResponseWriter, _ *http.Reques
 	app.WriteResult(w, response)
 }
 
-func GetSystemRealmById(c *app.Context, w http.ResponseWriter, r *http.Request) {
+func GetSystemRealmById(c *app.Context, w http.ResponseWriter, _ *http.Request) {
 	c.ActionName = "GetSystemRealmById"
 
 	response := app.NewResultModel()

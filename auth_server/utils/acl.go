@@ -168,20 +168,20 @@ func matchIP(ipp *string, ip net.IP) bool {
 	return ipnet.Contains(ip)
 }
 
-func matchLabels(ml map[string]string, rl Labels, vars []string) bool {
-	for label, pattern := range ml {
-		labelValues := rl[label]
-		matched := false
-		for _, lv := range labelValues {
-			if matchString(&pattern, lv, vars) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
-	}
+func matchLabels(ml map[string]string, rl StringMap, vars []string) bool {
+	//for label, pattern := range ml {
+	//	labelValues := rl[label]
+	//	matched := false
+	//	//for _, lv := range labelValues {
+	//	//	if matchString(&pattern, lv, vars) {
+	//	//		matched = true
+	//	//		break
+	//	//	}
+	//	//}
+	//	if !matched {
+	//		return false
+	//	}
+	//}
 	return true
 }
 
@@ -235,13 +235,13 @@ func (mc *MatchConditions) Matches(ai *AuthRequestInfo) bool {
 		}
 	}
 	labelMap := make(map[string][]string)
-	for label, labelValues := range ai.Labels {
-		var labelSet []string
-		for _, lv := range labelValues {
-			labelSet = append(labelSet, lv)
-		}
-		labelMap[fmt.Sprintf("${labels:%s}", label)] = labelSet
-	}
+	//for label, labelValues := range ai.Labels {
+	//	var labelSet []string
+	//	//for _, lv := range labelValues {
+	//	//	labelSet = append(labelSet, lv)
+	//	//}
+	//	labelMap[fmt.Sprintf("${labels:%s}", label)] = labelSet
+	//}
 	return matchStringWithLabelPermutations(mc.Account, ai.Account, vars, &labelMap) &&
 		matchStringWithLabelPermutations(mc.Type, ai.Type, vars, &labelMap) &&
 		matchStringWithLabelPermutations(mc.Name, ai.Name, vars, &labelMap) &&

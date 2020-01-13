@@ -61,7 +61,7 @@ func (ma *MongoAuth) authenticate(account string, password utils.PasswordString,
 		return false, nil, errors.New("invalid user details")
 	}
 	// Get Users roles MongoDB
-	user.Roles = command.DataStore.Users().GetUserRoles(user.UserId)
+	user.Roles = command.DataStore.Users().GetUserRoles(user.UserId,realm,false)
 	// Auth success
 	return true, &user, nil
 }

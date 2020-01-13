@@ -20,6 +20,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/cesanta/docker_auth/auth_server/command"
+	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"io/ioutil"
 	"strings"
@@ -60,7 +62,7 @@ func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString, 
 	}
 
 	account = la.escapeAccountInput(account)
-
+	realm = la.escapeAccountInput(realm)
 	filter := la.getFilter(account)
 
 	labelAttributes, labelsConfigErr := la.getLabelAttributes()
@@ -112,15 +114,21 @@ func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString, 
 		RealmName: realm,
 		Roles:     make([]utils.AuthzResult, 0),
 	}
+	// Add user if not exists
+	user := models.BaseUsers{
+		Username:           account,
+		AccountType:        models.ExternalAccount,
+		Active:             true,
+		AllowedSystemRealm: realm,
+	}
 
-	// gFilter:=la.getGroupFilter(account)
-	// // Extract roles(scope) from user account
-	// accountRoles, groupAttrMap, gSearchErr := la.ldapSearch(l, &la.config.Base, &gFilter, &labelAttributes)
-	// if gSearchErr != nil {
-	// 	glog.V(2).Infof("Group Error: %v",gSearchErr)
-	// 	return false, nil, gSearchErr
-	// }
-	// glog.V(1).Infof("Groups map[%v]: %v",account,accountRoles,groupAttrMap)
+	res := <-command.DataStore.Users().AddExternalUser(user)
+	if res.HasError() {
+		glog.V(2).Infof("could not add account: %v", res.Error)
+	}
+	// Account and roles defined locally
+	principal.Roles = command.DataStore.Users().GetUserRoles(account, realm, true)
+
 	return true, &principal, nil
 }
 
@@ -215,6 +223,7 @@ func (la *LDAPAuth) getFilter(account string) string {
 	glog.V(2).Infof("search filter is %s", filter)
 	return filter
 }
+
 func (la *LDAPAuth) getGroupFilter(account string) string {
 	filter := strings.NewReplacer("${account}", account).Replace(la.config.GroupFilter)
 	glog.V(2).Infof("Group filter is %s", filter)

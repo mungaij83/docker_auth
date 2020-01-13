@@ -228,7 +228,7 @@ func (gha *GitHubAuth) doGitHubAuthCreateToken(rw http.ResponseWriter, code stri
 		TokenType:   c2t.TokenType,
 		AccessToken: c2t.AccessToken,
 		ValidUntil:  time.Now().Add(gha.config.RevalidateAfter),
-		Labels:      map[string][]string{"teams": userTeams},
+		Labels:      utils.StringMap{"teams": userTeams},
 	}
 	dp, err := gha.db.StoreToken(user, v, true)
 	if err != nil {
@@ -409,7 +409,7 @@ func (gha *GitHubAuth) validateServerToken(user string) (*TokenDBValue, error) {
 	return v, nil
 }
 
-func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString,realm string) (bool, utils.Labels, error) {
+func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString, realm string) (bool, *utils.PrincipalDetails, error) {
 	err := gha.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = gha.validateServerToken(user)
@@ -427,8 +427,13 @@ func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString,r
 		}
 		return false, nil, err
 	}
-
-	return true, v.Labels, nil
+	principal := &utils.PrincipalDetails{
+		Username:  user,
+		RealmName: realm,
+		Active:    true,
+		Roles:     make([]utils.AuthzResult, 0),
+	}
+	return true, principal, nil
 }
 
 func (gha *GitHubAuth) Stop() {

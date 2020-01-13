@@ -130,6 +130,8 @@ func HandleCreateClient(c *app.Context, w http.ResponseWriter, _ *http.Request) 
 	clientDetails.StandardFlowEnabled = c.Data.GetBool("standard_flow_enabled")
 	clientDetails.PasswordGrantEnabled = c.Data.GetBool("password_grant_enabled")
 	clientDetails.AllowAllScope = c.Data.GetBool("allow_all_scope")
+	clientDetails.ClientProtocol = c.Data.GetString("auth_protocol")
+	clientDetails.AppRealm = c.Data.GetString("app_realm")
 	// Add client
 	res := <-command.DataStore.Clients().AddClient(clientDetails)
 	response.FromResult(res)
