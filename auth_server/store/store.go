@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/cesanta/docker_auth/auth_server/models"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/goonode/mogo"
 )
 
@@ -52,6 +53,7 @@ type Store interface {
 	Tokens() TokenStore
 	Clients() ClientStore
 	Settings() SettingsStore
+	ParseRoles(string, bool)
 	Close() bool
 }
 
@@ -68,6 +70,8 @@ type UserStore interface {
 	ListExternalUsers(page Page) DataChannel
 	GetExternalUser(userId string) DataChannel
 	RemoveExternalUser(userId string) DataChannel
+	// Roles
+	GetUserRoles(userId string) []utils.AuthzResult
 	// Extra attributes
 	AddUserExtraAttribute(userId string, attribute models.UserAttributes) DataChannel
 	RemoveUserExtraAttribute(userId string, attributeId string) DataChannel
@@ -182,6 +186,7 @@ type ClientStore interface {
 	// Roles
 	AddClientRole(roleId string, clientId string, clientService models.ClientRealmRoles) DataChannel
 	GetClientRoles(clientId string) DataChannel
+	ClientRoles(clientId string) []utils.AuthzResult
 	DeleteClientRole(clientServiceId string) DataChannel
 }
 

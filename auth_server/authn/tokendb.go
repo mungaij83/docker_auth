@@ -74,7 +74,7 @@ type TokenDBValue struct {
 	// DockerPassword is the temporary password we use to authenticate Docker users.
 	// Generated at the time of token creation, stored here as a BCrypt hash.
 	DockerPassword string       `json:"docker_password,omitempty"`
-	Labels         utils.Labels `json:"labels,omitempty"`
+	Labels         utils.StringMap `json:"labels,omitempty"`
 }
 
 // NewTokenDB returns a new TokenDB structure
@@ -105,7 +105,7 @@ func (db *TokenDBImpl) GetValue(user string) (*TokenDBValue, error) {
 
 func (db *TokenDBImpl) GetData(key string, prefix string) (utils.StringMap, error) {
 	if len(strings.TrimSpace(key)) <= 5 {
-		return nil, fmt.Errorf("authorization code is required[%v]",key)
+		return nil, fmt.Errorf("authorization code is required[%v]", key)
 	}
 	valueStr, err := db.Get(getDBKey(key, prefix), nil)
 	switch {

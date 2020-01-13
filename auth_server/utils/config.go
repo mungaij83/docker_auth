@@ -71,15 +71,15 @@ type LetsEncryptConfig struct {
 }
 
 type TokenConfig struct {
-	Issuer      string `yaml:"issuer,omitempty"`
-	CertFile    string `yaml:"jwt_cert,omitempty"`
-	KeyFile     string `yaml:"jwt_key,omitempty"`
-	AltCertFile string `yaml:"jwt_alt_cert,omitempty"`
-	AltKeyFile  string `yaml:"jwt_alt_key,omitempty"`
-	Expiration  int64  `yaml:"expiration,omitempty"`
-
-	publicKey  libtrust.PublicKey
-	privateKey libtrust.PrivateKey
+	Issuer        string `yaml:"issuer,omitempty"`
+	CertFile      string `yaml:"jwt_cert,omitempty"`
+	KeyFile       string `yaml:"jwt_key,omitempty"`
+	AltCertFile   string `yaml:"jwt_alt_cert,omitempty"`
+	AltKeyFile    string `yaml:"jwt_alt_key,omitempty"`
+	Expiration    int64  `yaml:"expiration,omitempty"`
+	AltExpiration int64  `yaml:"alt_expiration,omitempty"`
+	publicKey     libtrust.PublicKey
+	privateKey    libtrust.PrivateKey
 
 	alternatePrivateKey libtrust.PrivateKey
 	alternatePublicKey  libtrust.PublicKey

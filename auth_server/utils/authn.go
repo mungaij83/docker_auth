@@ -30,7 +30,7 @@ type Authenticator interface {
 	// e.g. none of the rules matched.
 	// Another special WrongPass error is returned if the authorizer failed to authenticate.
 	// Implementations must be goroutine-safe.
-	Authenticate(user string, password PasswordString) (bool, Labels, error)
+	Authenticate(user string, password PasswordString, realmName string) (bool, *PrincipalDetails, error)
 
 	// Finalize resources in preparation for shutdown.
 	// When this call is made there are guaranteed to be no Authenticate requests in flight
@@ -119,12 +119,6 @@ func (c *MongoAuthConfig) Validate(configKey string) error {
 	}
 
 	return nil
-}
-
-type AuthUserEntry struct {
-	Username *string `yaml:"username,omitempty" json:"username,omitempty"`
-	Password *string `yaml:"password,omitempty" json:"password,omitempty"`
-	Labels   Labels  `yaml:"labels,omitempty" json:"labels,omitempty"`
 }
 
 

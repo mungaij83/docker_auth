@@ -14,6 +14,20 @@ type MongoClientStore struct {
 	*MongoStore
 }
 
+func (cs MongoClientStore) ClientRoles(clientId string) []utils.AuthzResult {
+	res := <-cs.Groups().GetClientRoles(clientId)
+	if res.HasError() {
+		glog.V(1).Infof("Error fetching client roles: %v", res.Error)
+		return make([]utils.AuthzResult, 0)
+	}
+	data, ok := res.Data.([]utils.StringMap)
+	if ok {
+		return make([]utils.AuthzResult, 0)
+	}
+
+	return cs.ParseRoles(data, true)
+}
+
 func NewMongoClientStore(st *MongoStore) ClientStore {
 	str := MongoClientStore{st}
 	mogo.ModelRegistry.Register(models.Clients{}, models.ClientRealmRoles{})

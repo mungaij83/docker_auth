@@ -29,7 +29,7 @@ func NewStaticUserAuth(users map[string]*utils.Requirements) *staticUsersAuth {
 	return &staticUsersAuth{users: users}
 }
 
-func (sua *staticUsersAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (sua *staticUsersAuth) Authenticate(user string, password utils.PasswordString, realm string) (bool, *utils.PrincipalDetails, error) {
 	reqs := sua.users[user]
 	if reqs == nil {
 		return false, nil, utils.NoMatch
@@ -39,7 +39,27 @@ func (sua *staticUsersAuth) Authenticate(user string, password utils.PasswordStr
 			return false, nil, nil
 		}
 	}
-	return true, reqs.Labels, nil
+	roles := make([]utils.AuthzResult, 0)
+	// Add assigned roles
+	rawRoles := reqs.Labels.GetArray("roles")
+	for _, vv := range rawRoles {
+		v := utils.AuthzResult{
+			Scope: utils.AuthScope{
+				Type:    vv.GetString("type"),
+				Name:    vv.GetString("name"),
+				Actions: vv["actions"].([]string),
+			},
+			AutorizedActions: make([]string, 0),
+		}
+		roles = append(roles, v)
+	}
+	// Principal details
+	return true, &utils.PrincipalDetails{
+		Username:  user,
+		Active:    true,
+		RealmName: realm,
+		Roles:     roles,
+	}, nil
 }
 
 func (sua *staticUsersAuth) Stop() {

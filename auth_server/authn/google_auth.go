@@ -313,7 +313,7 @@ func (ga *GoogleAuth) doGoogleAuthSignOut(rw http.ResponseWriter, token string) 
 	_, _ = fmt.Fprint(rw, "signed out")
 }
 
-func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (ga *GoogleAuth) Authenticate(user string, password utils.PasswordString, realm string) (bool, utils.Labels, error) {
 	err := ga.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = ga.validateServerToken(user)

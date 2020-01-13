@@ -21,16 +21,16 @@ import (
 	"github.com/cesanta/glog"
 )
 
-
-
 type PluginAuthn struct {
-	cfg   *utils.PluginAuthnConfig
-	Authn utils.Authenticator
+	cfg                 *utils.PluginAuthnConfig
+	Authn               utils.Authenticator
+	PluginProtocol      string
+	ProtocolDescription string
 }
 
-func (c *PluginAuthn) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (c *PluginAuthn) Authenticate(user string, password utils.PasswordString, realm string) (bool, *utils.PrincipalDetails, error) {
 	// use the plugin
-	return c.Authn.Authenticate(user, password)
+	return c.Authn.Authenticate(user, password, realm)
 }
 
 func (c *PluginAuthn) Stop() {

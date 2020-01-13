@@ -23,6 +23,38 @@ type MongoStore struct {
 	groupStore    GroupStore
 }
 
+func (nm MongoStore) ParseRoles(data [] utils.StringMap, isClient bool) []utils.AuthzResult {
+	roles := make([]utils.AuthzResult, 0)
+	for _, role := range data {
+		v := utils.AuthzResult{
+			Scope: utils.AuthScope{
+				Name: role.GetString("role_name"),
+			},
+			AutorizedActions: make([]string, 0),
+		}
+		permissions := role.GetArray("permissions")
+		for _, permission := range permissions {
+			v.AutorizedActions = append(v.AutorizedActions, permission.GetString("permission_name"))
+		}
+		// Add extra attributes
+		for _, attr := range role.GetArray("attributes") {
+			switch attr.GetString("attr_key") {
+			case "type":
+				v.Scope.Type = attr.GetString("attr_value")
+				break
+			case "class":
+				v.Scope.ScopeClass = attr.GetString("attr_value")
+				break
+			default:
+				// Ignore other attributes
+			}
+		}
+
+		roles = append(roles, v)
+	}
+	return roles
+}
+
 // Init mongo store
 func NewMongoStore(c *utils.MongoConfig) (Store, error) {
 	glog.Infof("Config: %s", utils.ToJson(c))

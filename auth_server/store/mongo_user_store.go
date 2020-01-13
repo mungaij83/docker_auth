@@ -2,11 +2,14 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"github.com/cesanta/docker_auth/auth_server/models"
+	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
 	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
 	"github.com/goonode/mogo"
+	"strings"
 )
 
 type MongoUserStore struct {
@@ -45,7 +48,19 @@ func (us MongoUserStore) GetExternalUser(userId string) DataChannel {
 	}()
 	return st
 }
+func (us MongoUserStore) GetUserRoles(userId string) []utils.AuthzResult {
+	roles := make([]utils.AuthzResult, 0)
+	res := <-us.Groups().GetUserRoles(userId)
+	if res.HasError() {
+		return roles
+	}
+	data, ok := res.Data.([]utils.StringMap)
+	if !ok {
+		return roles
+	}
 
+	return us.ParseRoles(data, false)
+}
 func (us MongoUserStore) ListExternalUsers(page Page) DataChannel {
 	st := make(DataChannel)
 	go func() {
@@ -88,13 +103,28 @@ func (us MongoUserStore) GetUserForLogin(username, password, realm string, defau
 		}
 		q = append(q, bson.M{"allowed_system_realm": realm})
 		err = userDocs.Find(q).One(userDocs)
-
+		// User not found
 		if err != nil {
-			result.Error = err
+			glog.V(2).Infof("user details not found: %v", err)
+			result.Error = fmt.Errorf("invalid username or password")
+			result.Success = false
+		} else if strings.Compare(realm, userDocs.AllowedSystemRealm) != 0 { // don't allow other realm users
+			result.Error = fmt.Errorf("invalid user realm: %v", realm)
 			result.Success = false
 		} else {
-			// TODO: validate password
-			result.Data = userDocs
+			// Validate user password
+			h, _ := utils.NewHashParameters(true, utils.Pbkdf2Sha512, userDocs.HashedPassword)
+			if h.ValidateHash(password) {
+				var userDetails utils.PrincipalDetails
+				userDetails.Username = username
+				userDetails.Active = userDocs.Active
+				userDetails.RealmName = userDocs.AllowedSystemRealm
+				userDetails.Roles = make([]utils.AuthzResult, 0)
+				result.Data = userDetails
+			} else {
+				result.Error = fmt.Errorf("invalid username or password")
+				result.Success = false
+			}
 		}
 		st <- result
 	}()

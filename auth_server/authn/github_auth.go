@@ -409,7 +409,7 @@ func (gha *GitHubAuth) validateServerToken(user string) (*TokenDBValue, error) {
 	return v, nil
 }
 
-func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (gha *GitHubAuth) Authenticate(user string, password utils.PasswordString,realm string) (bool, utils.Labels, error) {
 	err := gha.db.ValidateToken(user, password)
 	if err == ExpiredToken {
 		_, err = gha.validateServerToken(user)

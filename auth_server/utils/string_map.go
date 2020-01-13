@@ -29,6 +29,16 @@ func (sm StringMap) GetBool(key string) bool {
 	return false
 }
 
+func (sm StringMap) GetArray(key string) []StringMap {
+	val, ok := sm[key]
+	if ok {
+		if vl, ok := val.([]StringMap); ok {
+			return vl
+		}
+	}
+	return nil
+}
+
 func (sm StringMap) GetInt64(key string) int64 {
 	val, ok := sm[key]
 	if ok {
@@ -53,7 +63,7 @@ func (sm StringMap) Add(key string, value interface{}) {
 
 type Requirements struct {
 	Password *PasswordString `yaml:"password,omitempty" json:"password,omitempty"`
-	Labels   Labels          `yaml:"labels,omitempty" json:"labels,omitempty"`
+	Labels   StringMap          `yaml:"labels,omitempty" json:"labels,omitempty"`
 }
 
 func (r Requirements) String() string {

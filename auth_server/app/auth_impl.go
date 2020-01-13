@@ -9,35 +9,45 @@ import (
 	"github.com/cesanta/docker_auth/auth_server/models"
 	"github.com/cesanta/docker_auth/auth_server/utils"
 	"github.com/cesanta/glog"
-	"math/rand"
 	"net"
 	"sort"
 	"strings"
-	"time"
 )
 
 const (
-	OpenIdAuthenticationProtocol = "openid"
-	Oauth2AutnticationProtocol   = "oauth2"
-	BasicAuthenticationProtocol  = "basic_auth"
+	StaticUserAuthenticationProtocol = "static_auth"
+	GithubAuthenticationProtocol     = "github_oauth2"
+	GoogleAuthenticationProtocol     = "google_oauth2"
+	OpenIdAuthenticationProtocol     = "openid"
+	Oauth2AuthenticationProtocol     = "oauth2"
+	BasicAuthenticationProtocol      = "basic_auth"
+	BasicAuthenticationLDAPProtocol  = "basic_auth_ldap"
 )
 
 type AuthService struct {
 	config         *utils.Config
-	authenticators []utils.Authenticator
+	tokenDB        authn.TokenDB
+	authenticators map[string]utils.Authenticator
 	authorizers    []utils.Authorizer
-	ga             *authn.GoogleAuth
-	gha            *authn.GitHubAuth
-	jwt            Jwt
+
+	googleAuthEnabled bool
+	githubAuthEnabled bool
+	jwt               Jwt
 }
 
 // Authorization service initialization
 func NewAuthService(c *utils.Config) (*AuthService, error) {
+	db, err := authn.NewTokenDB(c.Oauth2.TokenDb)
+	if err != nil {
+		return nil, err
+	}
 	as := &AuthService{
 		config:      c,
-		jwt:         Jwt{},
+		tokenDB:     db,
+		jwt:         Jwt{Config: c.Token},
 		authorizers: make([]utils.Authorizer, 0),
 	}
+	// Authorizers
 	if c.ACL != nil {
 		staticAuthorizer, err := authz.NewACLAuthorizer(c.ACL)
 		if err != nil {
@@ -55,61 +65,60 @@ func NewAuthService(c *utils.Config) (*AuthService, error) {
 	if c.ExtAuthz != nil {
 		extAuthorizer := authz.NewExtAuthzAuthorizer(c.ExtAuthz)
 		as.authorizers = append(as.authorizers, extAuthorizer)
+
 	}
+	// Authenticators
 	if c.Users != nil {
-		as.authenticators = append(as.authenticators, authn.NewStaticUserAuth(c.Users))
+		as.authenticators[StaticUserAuthenticationProtocol] = authn.NewStaticUserAuth(c.Users)
+		AddProtocol(StaticUserAuthenticationProtocol, "Static users")
 	}
-	if c.ExtAuth != nil {
-		as.authenticators = append(as.authenticators, authn.NewExtAuth(c.ExtAuth))
-	}
+
 	if c.GoogleAuth != nil {
 		ga, err := authn.NewGoogleAuth(c.GoogleAuth)
 		if err != nil {
 			return nil, err
 		}
-		as.authenticators = append(as.authenticators, ga)
-		as.ga = ga
+		as.authenticators[GoogleAuthenticationProtocol] = ga
+		as.googleAuthEnabled = true
+		AddProtocol(GoogleAuthenticationProtocol, "Google Oauth")
 	}
 	if c.GitHubAuth != nil {
 		gha, err := authn.NewGitHubAuth(c.GitHubAuth)
 		if err != nil {
 			return nil, err
 		}
-		as.authenticators = append(as.authenticators, gha)
-		as.gha = gha
+		as.authenticators[GithubAuthenticationProtocol] = gha
+		as.githubAuthEnabled = true
+		AddProtocol(GithubAuthenticationProtocol, "Github Authentication")
 	}
 	if c.LDAPAuth != nil {
 		la, err := authn.NewLDAPAuth(c.LDAPAuth)
 		if err != nil {
 			return nil, err
 		}
-		as.authenticators = append(as.authenticators, la)
+		as.authenticators[BasicAuthenticationLDAPProtocol] = la
 	}
+
 	if c.MongoAuth != nil {
 		ma, err := authn.NewMongoAuth(c.MongoAuth)
 		if err != nil {
 			return nil, err
 		}
-		as.authenticators = append(as.authenticators, ma)
+		as.authenticators[BasicAuthenticationProtocol] = ma
 	}
 	if c.PluginAuthn != nil {
 		pluginAuthn, err := authn.NewPluginAuthn(c.PluginAuthn)
 		if err != nil {
 			return nil, err
 		}
-		as.authenticators = append(as.authenticators, pluginAuthn)
-	}
-	if c.PluginAuthz != nil {
-		pluginAuthz, err := authz.NewPluginAuthzAuthorizer(c.PluginAuthz)
-		if err != nil {
-			return nil, err
-		}
-		as.authorizers = append(as.authorizers, pluginAuthz)
+		as.authenticators[pluginAuthn.PluginProtocol] = pluginAuthn
+		AddProtocol(pluginAuthn.PluginProtocol, pluginAuthn.ProtocolDescription)
 	}
 	// Add all protocols if not exits
 	AddProtocol(OpenIdAuthenticationProtocol, "OpenId connect protocol")
 	AddProtocol(BasicAuthenticationProtocol, "Basic Authentication protocol")
-	AddProtocol(Oauth2AutnticationProtocol, "Oauth2 Authentication protocol")
+	AddProtocol(Oauth2AuthenticationProtocol, "Oauth2 Authentication protocol")
+	AddProtocol(BasicAuthenticationLDAPProtocol, "Basic Auth with LDAP")
 	return as, nil
 }
 
@@ -121,29 +130,98 @@ func AddProtocol(protocolId, description string) {
 	if res.HasError() {
 		glog.Infof("failed to add protocol: %+v", res)
 	}
-
 }
-func (as *AuthService) Authenticate(ar *utils.AuthRequest) (bool, utils.Labels, error) {
 
-	for i, a := range as.authenticators {
-		result, labels, err := a.Authenticate(ar.Account, ar.Password)
-		glog.V(2).Infof("Authn %s %s -> %t, %+v, %v", a.Name(), ar.Account, result, labels, err)
-		if err != nil {
-			if err == utils.NoMatch {
-				continue
-			} else if err == utils.WrongPass {
-				glog.Warningf("Failed authentication with %s: %s", err, ar.Account)
-				return false, nil, nil
-			}
-			err = fmt.Errorf("authn #%d returned error: %s", i+1, err)
-			glog.Errorf("%s: %s", ar, err)
-			return false, nil, err
+// Authenticate user using client selected authentication methods
+func (as *AuthService) AuthenticateUser(ar *utils.AuthRequest) (bool, *utils.PrincipalDetails, error) {
+	res := <-command.DataStore.Clients().GetClientByClientId(ar.ClientId)
+	if res.HasError() {
+		return false, nil, res.Error
+	}
+
+	client, ok := res.Data.(*models.Clients)
+	if !ok {
+		glog.Infof("Invalid result model for client data")
+		return false, nil, nil
+	}
+	// Select protocol
+	a, ok := as.authenticators[client.ClientProtocol]
+	if !ok {
+		glog.Infof("Authentication method/scheme not registered: %v", client.ClientProtocol)
+		return false, nil, fmt.Errorf("invalid authentication protocol: %v", client.ClientProtocol)
+	}
+	// Authenticate user using client protocol
+	result, labels, err := a.Authenticate(ar.Account, ar.Password, client.AppRealm)
+	glog.V(2).Infof("Authn %s %s -> %t, %+v, %v", a.Name(), ar.Account, result, labels, err)
+	if err != nil {
+		if err == utils.WrongPass {
+			glog.Warningf("Failed authentication with %s: %s", err, ar.Account)
+			return false, nil, errors.New("invalid username or password")
 		}
+		err = fmt.Errorf("authn[%s] returned error: %s", client.ClientProtocol, err)
+		glog.Errorf("%s: %s", ar, err)
+		return false, nil, err
+	} else if result {
 		return result, labels, nil
 	}
-	// Deny by default.
 	glog.Warningf("%s did not match any authn rule", ar)
+	// Deny by default.
 	return false, nil, nil
+}
+
+// Validate request type, client_id, and request direction
+func (as *AuthService) ValidateClientDetails(client utils.AuthDetails) (bool, error) {
+	if strings.Compare(client.ResponseType, "code") != 0 || strings.Compare(client.ResponseType, "token") != 0 {
+		return false, errors.New(fmt.Sprintf("Invalid request type: %v", client.ResponseType))
+	}
+	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
+	if res.HasError() {
+		return false, res.Error
+	}
+	c, ok := res.Data.(*models.Clients)
+	if !ok {
+		return false, errors.New(fmt.Sprintf("Invalid client id: %v", client.ClientId))
+	}
+	// Check grant type allowed on client
+	switch client.GrantType {
+	case AuthorizationCodeGrantType:
+		if !c.StandardFlowEnabled {
+			return false, errors.New("client is not allowed to request access code")
+		}
+		break
+	case ImplicitGrant:
+		if !c.ImplicitFlowEnabled {
+			return false, errors.New("client is not allowed to request access token")
+		}
+		break
+	case PasswordGrant:
+		if !c.PasswordGrantEnabled {
+			return false, errors.New("client is not allowed to direct grant")
+		}
+		break
+	case ClientCredentialsGrant:
+		// Validate hashed password
+		h, _ := utils.NewHashParameters(true, "", c.ClientSecret)
+		if !h.ValidateHash(client.ClientSecret) {
+			glog.Infof("invalid client secret")
+			return false, errors.New("invalid client id or secret")
+		}
+		break
+	default:
+		return false, fmt.Errorf("invalid grant type %s", client.GrantType)
+	}
+
+	// TODO: Check remote host
+	//scopes := strings.Split(client.Scope, ":")
+	var err error
+	//for _, v := range scopes {
+	// TODO: check allowed scope
+	//if !itemExists(c.Scopes, v) {
+	//	err = errors.New(fmt.Sprintf("invalid scope: %v", v))
+	//	break
+	//}
+	//}
+	return true, err
 }
 
 func (as *AuthService) ParseRequest(req *Context, ipAddr net.IP) (*utils.AuthRequest, error) {
@@ -242,6 +320,22 @@ func (as *AuthService) authorizeScope(ai *utils.AuthRequestInfo) ([]string, erro
 	return nil, nil
 }
 
+func (as *AuthService) StoreJwtDetails(result utils.StringMap) error {
+	accessToken := result.GetString(utils.AccessTokenField)
+	err := as.tokenDB.StoreData(accessToken, AccessTokenNamespace, result)
+	if err != nil {
+		return err
+	}
+	refreshToken := result.GetString(utils.RefreshTokenField)
+	if len(refreshToken) > 0 {
+		err = as.tokenDB.StoreData(refreshToken, RefreshTokenNamespace, result)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (as *AuthService) Authorize(ar *utils.AuthRequest) ([]utils.AuthzResult, error) {
 
 	ares := make([]utils.AuthzResult, 0)
@@ -265,69 +359,24 @@ func (as *AuthService) Authorize(ar *utils.AuthRequest) ([]utils.AuthzResult, er
 }
 
 // https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
-func (as *AuthService) CreateToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
-	tc := &as.config.Token
-	ar.Service = tc.Issuer
-	payload, sigAlg, err := as.GetClaims(ar, ares)
+func (as *AuthService) CreateToken(pricipal utils.PrincipalDetails) (utils.StringMap, error) {
+	payload, sigAlg, err := as.jwt.GetClaims(pricipal, true)
 	if err != nil {
 		return nil, err
 	}
-
-	sig, sigAlg2, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
-	if err != nil || sigAlg2 != sigAlg {
-		return nil, fmt.Errorf("failed to sign token: %s", err)
-	}
-	result := utils.StringMap{}
-	glog.Infof("New token for %s %+v", *ar, ar.Labels)
-	result.Add(utils.AccessTokenField, fmt.Sprintf("%s%s%s", payload, TokenSeparator, utils.JsonBase64UrlEncode(sig)))
-	result.Add(utils.JwtExpireInField, tc.Expiration)
-	result.Add(utils.JwtTokenType, utils.BearerTokenType)
-	return result, nil
+	return as.jwt.GenerateJWT(payload, "", sigAlg)
 }
 
-func (as *AuthService) GetClaims(ar *utils.AuthRequest, ares []utils.AuthzResult) (string, string, error) {
-	now := time.Now().Unix()
-	tc := &as.config.Token
-	// Sign something dummy to find out which algorithm is used.
-	_, sigAlg, err := tc.GetPrivateKey().Sign(strings.NewReader("dummy"), 0)
+// Validates a JWT token
+func (as *AuthService) ValidateJWT(tokenStr, signAlg string, isAlt bool) (utils.StringMap, error) {
+	claims, err := as.jwt.ValidateJWT(tokenStr, signAlg, isAlt)
 	if err != nil {
-		return "", sigAlg, err
+		return nil, err
 	}
-	header := JwtHeader{
-		Type:       "JWT",
-		SigningAlg: sigAlg,
-		KeyID:      tc.GetPublicKey().KeyID(),
-	}
-	headerJSON := utils.ToJson(header)
-
-	claims := JwtClaims{
-		Issuer:     tc.Issuer,
-		Subject:    ar.Account,
-		Audience:   ar.Service,
-		NotBefore:  now - 10,
-		IssuedAt:   now,
-		Expiration: now + tc.Expiration,
-		JWTID:      fmt.Sprintf("%d", rand.Int63()),
-		Access:     []*JwtResourceAccess{},
-	}
-	for _, a := range ares {
-		ra := &JwtResourceAccess{
-			Type:    a.Scope.Type,
-			Name:    a.Scope.Name,
-			Actions: a.AutorizedActions,
-		}
-		if ra.Actions == nil {
-			ra.Actions = []string{}
-		}
-		sort.Strings(ra.Actions)
-		claims.Access = append(claims.Access, ra)
-	}
-	claimsJSON := utils.ToJson(claims)
-
-	payload := fmt.Sprintf("%s%s%s", as.jwt.EncodeSegment([]byte(headerJSON)), TokenSeparator, as.jwt.EncodeSegment([]byte(claimsJSON)))
-	return payload, sigAlg, nil
+	return utils.ToStringMap(claims), nil
 }
 
+// Creates authorization token
 func (as *AuthService) CreateAuthorizationToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
 	payload, err := utils.RandomString(15, false)
 	tc := &as.config.Token
@@ -350,102 +399,19 @@ func (as *AuthService) CreateAuthorizationToken(ar *utils.AuthRequest, ares []ut
 }
 
 // https://github.com/docker/distribution/blob/master/docs/spec/auth/token.md#example
-func (as *AuthService) CreateOAuthToken(ar *utils.AuthRequest, ares []utils.AuthzResult) (utils.StringMap, error) {
-	payload, sigAlg, err := as.GetClaims(ar, ares)
+// Generate access token and refresh token
+func (as *AuthService) CreateOAuthToken(principal utils.PrincipalDetails) (utils.StringMap, error) {
+	payload, sigAlg, err := as.jwt.GetClaims(principal, true)
 	if err != nil {
 		return nil, err
-	}
-	glog.Infof("New token for %s %+v", *ar, ar.Labels)
-	return as.GenerateJWT(payload, sigAlg)
-}
-
-// Validate a JWT token
-func (as *AuthService) ValidateJWT(tokenStr, signAlg string, isAlt bool) (utils.StringMap, error) {
-	parts := strings.Split(tokenStr, TokenSeparator)
-	if len(parts) != 3 {
-		return nil, errors.New("invalid JWT token")
 	}
 
-	// Access token header
-	headerJson, err := as.jwt.DecodeSegment(parts[0])
-	if err != nil {
-		glog.V(2).Infof("Invalid header encoding: %v", err)
-		return nil, err
-	}
-	var header JwtHeader
-	err = utils.FromJson(string(headerJson), &header)
+	refreshPayload, _, err := as.jwt.GetClaims(principal, false)
 	if err != nil {
 		return nil, err
 	}
-	// Refresh token header
-	claimJSON, err := as.jwt.DecodeSegment(parts[1])
-	if err != nil {
-		glog.V(2).Infof("Invalid body encoding: %v", err)
-		return nil, err
-	}
-	var claims JwtClaims
-	err = utils.FromJson(string(claimJSON), &claims)
-	if err != nil {
-		return nil, err
-	}
-	// Validate refresh or access token signature
-	signature := parts[2]
-	payload := fmt.Sprintf("%s%s%s", parts[0], TokenSeparator, parts[1])
-	ds, _ := as.jwt.DecodeSegment(signature)
-	if isAlt {
-		if as.config.Token.GetAltPublicKey() != nil {
-			return nil, errors.New("invalid refresh token key")
-		}
-		err = as.config.Token.GetAltPublicKey().Verify(strings.NewReader(payload), header.SigningAlg, ds)
-		if err != nil {
-			m := "invalid signature"
-			glog.V(2).Infof("%s:%v", m, err)
-			return nil, errors.New(m)
-		}
-	} else {
-		err = as.config.Token.GetPublicKey().Verify(strings.NewReader(payload), header.SigningAlg, ds)
-		if err != nil {
-			m := "invalid signature"
-			glog.V(2).Infof("%s:%v", m, err)
-			return nil, errors.New(m)
-		}
-	}
-	return utils.ToStringMap(&claims), nil
-}
-
-func (as *AuthService) GenerateJWT(payload string, sigAlg string) (utils.StringMap, error) {
-	tokenResult := utils.StringMap{}
-	var err error
-	tc := &as.config.Token
-	// Public key configured
-	if tc.GetPublicKey() == nil {
-		err = errors.New("public key not configured")
-		return tokenResult, err
-	}
-	// Private key check
-	if tc.GetPrivateKey() == nil {
-		err = errors.New("private key not configured")
-		return tokenResult, err
-	}
-	// Token check
-	sig, _, err := tc.GetPrivateKey().Sign(strings.NewReader(payload), 0)
-	if err != nil {
-		return tokenResult, fmt.Errorf("failed to sign token: %s", err.Error())
-	}
-	if tc.GetAltPrivateKey() != nil {
-		sigRefresh, _, err2 := tc.GetAltPrivateKey().Sign(strings.NewReader(payload), 0)
-		if err2 != nil {
-			return tokenResult, fmt.Errorf("failed to sign token: %s", err2.Error())
-		}
-		// Add access token and refresh token
-		tokenResult.Add("refresh_token", fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sigRefresh)))
-	}
-	tokenResult.Add(utils.AccessTokenField, fmt.Sprintf("%s%s%s", payload, TokenSeparator, as.jwt.EncodeSegment(sig)))
-	glog.Infof("Token: %s", utils.ToJson(tokenResult))
-	tokenResult.Add(utils.JwtExpireInField, tc.Expiration)
-	tokenResult.Add(utils.JwtTokenType, "Bearer")
-	glog.V(2).Infof("generated JWT token")
-	return tokenResult, nil
+	glog.Infof("New token for  %+v", principal)
+	return as.jwt.GenerateJWT(payload, refreshPayload, sigAlg)
 }
 
 func (as *AuthService) GetToken() utils.TokenConfig {
@@ -457,11 +423,11 @@ func (as *AuthService) GetServerConfig() utils.ServerConfig {
 }
 
 func (as *AuthService) GoogleAuthEnabled() bool {
-	return as.ga != nil
+	return as.googleAuthEnabled
 }
 
 func (as *AuthService) GithubAuthEnabled() bool {
-	return as.gha != nil
+	return as.githubAuthEnabled
 }
 
 func (as *AuthService) Stop() {
@@ -475,7 +441,7 @@ func (as *AuthService) Stop() {
 }
 
 // Client credentials grant type
-func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, request *utils.AuthRequest, results []utils.AuthzResult) (utils.StringMap, error) {
+func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, principal utils.PrincipalDetails) (utils.StringMap, error) {
 	res := <-command.DataStore.Clients().GetClientByClientId(client.ClientId)
 	if res.HasError() {
 		glog.Infof("client not found: %+v", res)
@@ -504,11 +470,10 @@ func (as *AuthService) GrantClientCredentials(client utils.AuthDetails, request 
 		glog.Infof("invalid client secret")
 		return nil, errors.New("invalid client id or secret")
 	}
-	request.User = client.ClientId
-	payload, sigAlg, err := as.GetClaims(request, results)
+	payload, sigAlg, err := as.jwt.GetClaims(principal, true)
 	if err != nil {
 		return nil, err
 	}
-	glog.Infof("Grant client credentials")
-	return as.GenerateJWT(payload, sigAlg)
+	glog.V(2).Infof("Grant client credentials")
+	return as.jwt.GenerateJWT(payload, "", sigAlg)
 }

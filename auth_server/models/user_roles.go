@@ -8,8 +8,8 @@ import (
 // Extra user permission attributes
 type RoleAttributes struct {
 	mogo.DocumentModel `bson:",inline" collection:"sys_user_permission_attributes"`
-	AttrKey            string
-	AttrValue          string
+	AttrKey            string        `json:"attr_key"`
+	AttrValue          string        `json:"attr_value"`
 	PermissionRef      mogo.RefField `ref:"UserPermissions"`
 }
 

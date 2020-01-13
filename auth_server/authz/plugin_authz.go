@@ -21,10 +21,10 @@ import (
 	"github.com/cesanta/glog"
 )
 
-
-
 type PluginAuthz struct {
-	Authz utils.Authorizer
+	Authz               utils.Authorizer
+	ProtocolDescription string
+	ProtocolName        string
 }
 
 func (c *PluginAuthz) Stop() {

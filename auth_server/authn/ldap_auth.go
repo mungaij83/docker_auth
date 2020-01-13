@@ -42,7 +42,7 @@ func NewLDAPAuth(c *utils.LDAPAuthConfig) (*LDAPAuth, error) {
 }
 
 //How to authenticate user, please refer to https://github.com/go-ldap/ldap/blob/master/example_test.go#L166
-func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString) (bool, utils.Labels, error) {
+func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString, realm string) (bool, *utils.PrincipalDetails, error) {
 	if account == "" || password == "" {
 		return false, nil, utils.NoMatch
 	}
@@ -96,7 +96,7 @@ func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString) 
 	}
 
 	// Extract labels from the attribute values
-	labels, labelsExtractErr := la.getLabelsFromMap(entryAttrMap)
+	_, labelsExtractErr := la.getLabelsFromMap(entryAttrMap)
 	if labelsExtractErr != nil {
 		return false, nil, labelsExtractErr
 	}
@@ -106,6 +106,13 @@ func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString) 
 		glog.V(1).Infof("Groups map: %v", )
 		return false, nil, bindErr
 	}
+	principal := utils.PrincipalDetails{
+		Username:  account,
+		Active:    true,
+		RealmName: realm,
+		Roles:     make([]utils.AuthzResult, 0),
+	}
+
 	// gFilter:=la.getGroupFilter(account)
 	// // Extract roles(scope) from user account
 	// accountRoles, groupAttrMap, gSearchErr := la.ldapSearch(l, &la.config.Base, &gFilter, &labelAttributes)
@@ -114,25 +121,25 @@ func (la *LDAPAuth) Authenticate(account string, password utils.PasswordString) 
 	// 	return false, nil, gSearchErr
 	// }
 	// glog.V(1).Infof("Groups map[%v]: %v",account,accountRoles,groupAttrMap)
-	return true, labels, nil
+	return true, &principal, nil
 }
 
 func (la *LDAPAuth) bindReadOnlyUser(l *ldap.Conn) error {
 	if la.config.BindDN != "" {
-		var password_str string
+		var passwordStr string
 		if la.config.BindPasswordFile != "" {
 			password, err := ioutil.ReadFile(la.config.BindPasswordFile)
 			if err != nil {
 				return err
 
 			}
-			password_str = strings.TrimSpace(string(password))
+			passwordStr = strings.TrimSpace(string(password))
 		} else {
-			password_str = strings.TrimSpace(la.config.BindPassword)
+			passwordStr = strings.TrimSpace(la.config.BindPassword)
 		}
-		glog.V(2).Infof("Password: %s", password_str)
+		glog.V(2).Infof("Password: %s", passwordStr)
 		glog.V(2).Infof("Bind read-only user (DN = %s)", la.config.BindDN)
-		err := l.Bind(la.config.BindDN, password_str)
+		err := l.Bind(la.config.BindDN, passwordStr)
 		if err != nil {
 			return err
 		}
@@ -172,11 +179,11 @@ func (la *LDAPAuth) ldapConnection() (*ldap.Conn, error) {
 			pool := x509.NewCertPool()
 			pem, err := ioutil.ReadFile(la.config.CACertificate)
 			if err != nil {
-				return nil, fmt.Errorf("Error loading CA File: %s", err)
+				return nil, fmt.Errorf("error loading CA File: %s", err)
 			}
 			ok := pool.AppendCertsFromPEM(pem)
 			if !ok {
-				return nil, fmt.Errorf("Error loading CA File: Couldn't parse PEM in: %s", la.config.CACertificate)
+				return nil, fmt.Errorf("error loading CA File: Couldn't parse PEM in: %s", la.config.CACertificate)
 			}
 			tlsConfig = &tls.Config{InsecureSkipVerify: false, ServerName: addr[0], RootCAs: pool}
 		} else {
@@ -218,7 +225,7 @@ func (la *LDAPAuth) getGroupFilter(account string) string {
 //default return entry's DN value if you leave attrs array empty
 func (la *LDAPAuth) ldapSearch(l *ldap.Conn, baseDN *string, filter *string, attrs *[]string) (string, map[string][]string, error) {
 	if l == nil {
-		return "", nil, fmt.Errorf("No ldap connection!")
+		return "", nil, fmt.Errorf("no LDAP connection")
 	}
 	glog.V(2).Infof("Searching...basedDN:%s, filter:%s", *baseDN, *filter)
 	searchRequest := ldap.NewSearchRequest(
@@ -236,7 +243,7 @@ func (la *LDAPAuth) ldapSearch(l *ldap.Conn, baseDN *string, filter *string, att
 	if len(sr.Entries) == 0 {
 		return "", nil, nil // User does not exist
 	} else if len(sr.Entries) > 1 {
-		return "", nil, fmt.Errorf("Too many entries returned.")
+		return "", nil, fmt.Errorf("too many entries returned")
 	}
 
 	attributes := make(map[string][]string)
@@ -262,7 +269,7 @@ func (la *LDAPAuth) getLabelAttributes() ([]string, error) {
 	i := 0
 	for key, mapping := range la.config.LabelMaps {
 		if mapping.Attribute == "" {
-			return nil, fmt.Errorf("Label %s is missing 'attribute' to map from", key)
+			return nil, fmt.Errorf("label %s is missing 'attribute' to map from", key)
 		}
 		labelAttributes[i] = mapping.Attribute
 		i++
@@ -274,7 +281,7 @@ func (la *LDAPAuth) getLabelsFromMap(attrMap map[string][]string) (map[string][]
 	labels := make(map[string][]string)
 	for key, mapping := range la.config.LabelMaps {
 		if mapping.Attribute == "" {
-			return nil, fmt.Errorf("Label %s is missing 'attribute' to map from", key)
+			return nil, fmt.Errorf("label %s is missing 'attribute' to map from", key)
 		}
 
 		mappingValues := attrMap[mapping.Attribute]
@@ -294,12 +301,14 @@ func (la *LDAPAuth) getLabelsFromMap(attrMap map[string][]string) (map[string][]
 
 func (la *LDAPAuth) getCNFromDN(dn string) string {
 	parsedDN, err := ldap.ParseDN(dn)
-	if err != nil || len(parsedDN.RDNs) > 0 {
-		for _, rdn := range parsedDN.RDNs {
-			for _, rdnAttr := range rdn.Attributes {
-				if strings.ToUpper(rdnAttr.Type) == "CN" {
-					return rdnAttr.Value
-				}
+	if err != nil {
+		return ""
+	}
+	// Parsed DN result
+	for _, rdn := range parsedDN.RDNs {
+		for _, rdnAttr := range rdn.Attributes {
+			if strings.ToUpper(rdnAttr.Type) == "CN" {
+				return rdnAttr.Value
 			}
 		}
 	}

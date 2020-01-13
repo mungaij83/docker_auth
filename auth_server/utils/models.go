@@ -11,9 +11,10 @@ type AuthRequest struct {
 	User           string
 	Password       PasswordString
 	Account        string
+	ClientId       string
 	Service        string
 	Scopes         []AuthScope
-	Labels         Labels
+	Labels         StringMap
 }
 type AuthDetails struct {
 	Username          string
@@ -62,9 +63,10 @@ func (a AuthDetails) Validate() (StringMap, bool) {
 }
 
 type AuthScope struct {
-	Type    string
-	Name    string
-	Actions []string
+	Type       string   `json:"type,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	ScopeClass string   `json:"class,omitempty"`
+	Actions    []string `json:"actions"`
 }
 
 type AuthzResult struct {
@@ -72,7 +74,6 @@ type AuthzResult struct {
 	AutorizedActions []string
 }
 
-type Labels map[string][]string
 
 type PasswordString string
 
@@ -164,4 +165,13 @@ type ProfileResponse struct {
 type LabelMap struct {
 	Attribute string `yaml:"attribute,omitempty"`
 	ParseCN   bool   `yaml:"parse_cn,omitempty"`
+}
+
+type PrincipalDetails struct {
+	UserId       string `json:"-"`
+	Username     string
+	EmailAddress string
+	Active       bool
+	RealmName    string
+	Roles        [] AuthzResult
 }
